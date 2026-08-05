@@ -1,0 +1,930 @@
+import { groundSize, mercatorAspect, fmtDist, fmtScale,
+         worldSize, lon2x, lat2y, y2lat } from './geo.js';
+import { fetchElevationGrid, smoothGrid, histogram, DEM_SOURCES } from './terrain.js';
+import { makeThresholds, buildLayers, sheetRect } from './contour.js';
+import { fetchOsmFeatures, FEATURE_GROUPS } from './osm.js';
+import { sheetSVG, stackedSVG, tiledSVG, jigSVG } from './svg.js';
+import { renderStack, renderSheet, renderHistogram } from './preview.js';
+import { makeZip, download } from './zip.js';
+
+const $ = id => document.getElementById(id);
+const num = id => parseFloat($(id).value);
+
+/* ── state ───────────────────────────────────────────────────────────── */
+
+const state = {
+  bbox: null,
+  grid: null,          // raw sampled elevations
+  smoothed: null,      // after terrain smoothing — what contours are cut from
+  hist: null,
+  thresholds: [],
+  sheets: [],
+  masks: null,         // per-sheet material coverage, drives feature and pin placement
+  pins: [],
+  features: null,
+  overlay: null,
+  sheetIndex: 0,
+  view: 'map',
+  abort: null,
+};
+
+/* ── chrome ──────────────────────────────────────────────────────────── */
+
+function setStatus(text, cls = 'idle') {
+  const el = $('status');
+  el.textContent = text;
+  el.className = 'status ' + cls;
+}
+function setProgress(p, text) {
+  const el = $('progress');
+  el.hidden = false;
+  el.querySelector('.bar').style.setProperty('--p', Math.round(p * 100) + '%');
+  el.querySelector('.txt').textContent = text || '';
+}
+const hideProgress = () => { $('progress').hidden = true; };
+
+document.querySelectorAll('.grp>h2').forEach(h =>
+  h.addEventListener('click', () => {
+    const g = h.parentElement;
+    g.dataset.open = g.dataset.open === '1' ? '0' : '1';
+  }));
+
+/* ── map & selection frame ───────────────────────────────────────────── */
+
+const map = L.map('map', { zoomControl: true, attributionControl: true })
+  .setView([53.0685, -4.0764], 12);   // Snowdon — good terrain to open on
+
+const BASEMAPS = {
+  osm: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
+  }),
+  topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    maxZoom: 17, subdomains: 'abc',
+    attribution: '&copy; OpenStreetMap contributors, SRTM | &copy; OpenTopoMap (CC-BY-SA)',
+  }),
+};
+let basemap = BASEMAPS.osm.addTo(map);
+document.querySelectorAll('input[name=bm]').forEach(r =>
+  r.addEventListener('change', () => {
+    map.removeLayer(basemap);
+    basemap = BASEMAPS[r.value].addTo(map);
+  }));
+
+const frameEl = $('frame');
+
+function pxRect() {
+  const nw = map.latLngToContainerPoint([state.bbox.north, state.bbox.west]);
+  const se = map.latLngToContainerPoint([state.bbox.south, state.bbox.east]);
+  return { l: nw.x, t: nw.y, r: se.x, b: se.y };
+}
+function setPxRect({ l, t, r, b }) {
+  const nw = map.containerPointToLatLng([l, t]);
+  const se = map.containerPointToLatLng([r, b]);
+  state.bbox = { north: nw.lat, west: nw.lng, south: se.lat, east: se.lng };
+}
+
+function drawFrame() {
+  if (!state.bbox) return;
+  const { l, t, r, b } = pxRect();
+  frameEl.hidden = false;
+  Object.assign(frameEl.style, {
+    left: l + 'px', top: t + 'px', width: Math.max(0, r - l) + 'px', height: Math.max(0, b - t) + 'px',
+  });
+  const g = groundSize(state.bbox);
+  $('frameDim').textContent = `${fmtDist(g.width)} × ${fmtDist(g.height)}`;
+}
+
+map.on('move zoom viewreset resize', drawFrame);
+map.on('zoomstart', () => { frameEl.style.opacity = '0'; });
+map.on('zoomend', () => { frameEl.style.opacity = ''; drawFrame(); });
+
+/**
+ * Reshape the selection to the sheet's aspect ratio, keeping its width and
+ * centre. Done in Mercator rather than screen pixels so it stays correct while
+ * the map tab is hidden — a hidden map reports zero size, which would otherwise
+ * collapse the selection to nothing.
+ */
+function applySheetAspect() {
+  if (!state.bbox) return;
+  const A = num('sheetW') / num('sheetH');
+  if (!isFinite(A) || A <= 0) return;
+  const ws = worldSize(20);
+  const x0 = lon2x(state.bbox.west, ws), x1 = lon2x(state.bbox.east, ws);
+  const y0 = lat2y(state.bbox.north, ws), y1 = lat2y(state.bbox.south, ws);
+  const cy = (y0 + y1) / 2, h = (x1 - x0) / A;
+  state.bbox = {
+    west: state.bbox.west, east: state.bbox.east,
+    north: y2lat(cy - h / 2, ws), south: y2lat(cy + h / 2, ws),
+  };
+  drawFrame();
+  onAreaChanged();
+}
+
+function frameToView() {
+  const s = map.getSize();
+  if (s.x < 20 || s.y < 20) return;      // map tab hidden — nothing to fit to
+  const w = Math.min(s.x, s.y) * 0.62;
+  const aspect = num('sheetW') / num('sheetH') || 1.5;
+  let fw = w, fh = w / aspect;
+  if (fh > s.y * 0.78) { fh = s.y * 0.78; fw = fh * aspect; }
+  setPxRect({ l: (s.x - fw) / 2, t: (s.y - fh) / 2, r: (s.x + fw) / 2, b: (s.y + fh) / 2 });
+  drawFrame(); onAreaChanged();
+}
+
+// drag / resize
+let drag = null;
+frameEl.addEventListener('pointerdown', e => {
+  const handle = e.target.classList.contains('fh') ? e.target.dataset.h : 'move';
+  drag = { handle, x: e.clientX, y: e.clientY, start: pxRect() };
+  frameEl.setPointerCapture(e.pointerId);
+  map.dragging.disable();
+  e.preventDefault(); e.stopPropagation();
+});
+frameEl.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  let { l, t, r, b } = drag.start;
+
+  if (drag.handle === 'move') {
+    l += dx; r += dx; t += dy; b += dy;
+  } else {
+    const h = drag.handle;
+    if (h.includes('w')) l += dx;
+    if (h.includes('e')) r += dx;
+    if (h.includes('n')) t += dy;
+    if (h.includes('s')) b += dy;
+    if (r - l < 24) { if (h.includes('w')) l = r - 24; else r = l + 24; }
+    if (b - t < 24) { if (h.includes('n')) t = b - 24; else b = t + 24; }
+
+    if ($('lockAspect').checked) {
+      const A = num('sheetW') / num('sheetH');
+      if (h === 'n' || h === 's') {
+        const w = (b - t) * A, cx = (l + r) / 2; l = cx - w / 2; r = cx + w / 2;
+      } else if (h === 'e' || h === 'w') {
+        const hh = (r - l) / A, cy = (t + b) / 2; t = cy - hh / 2; b = cy + hh / 2;
+      } else {
+        const hh = (r - l) / A;
+        if (h.includes('n')) t = b - hh; else b = t + hh;
+      }
+    }
+  }
+  setPxRect({ l, t, r, b });
+  drawFrame();
+});
+const endDrag = e => {
+  if (!drag) return;
+  drag = null;
+  map.dragging.enable();
+  try { frameEl.releasePointerCapture(e.pointerId); } catch {}
+  onAreaChanged();
+};
+frameEl.addEventListener('pointerup', endDrag);
+frameEl.addEventListener('pointercancel', endDrag);
+
+/* ── place search ────────────────────────────────────────────────────── */
+
+$('searchBtn').addEventListener('click', () => {
+  const row = $('searchRow');
+  row.hidden = !row.hidden;
+  if (!row.hidden) $('searchInput').focus();
+});
+$('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+$('searchGo').addEventListener('click', doSearch);
+
+async function doSearch() {
+  const q = $('searchInput').value.trim();
+  if (!q) return;
+  const box = $('searchResults');
+  box.hidden = false;
+  box.innerHTML = '<button disabled>Searching…</button>';
+  try {
+    const res = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&q=' +
+                            encodeURIComponent(q));
+    const list = await res.json();
+    if (!list.length) { box.innerHTML = '<button disabled>No matches</button>'; return; }
+    box.innerHTML = '';
+    for (const r of list) {
+      const b = document.createElement('button');
+      b.textContent = r.display_name;
+      b.addEventListener('click', () => {
+        if (r.boundingbox) {
+          const [s, n, w, e] = r.boundingbox.map(Number);
+          map.fitBounds([[s, w], [n, e]], { padding: [60, 60] });
+        } else {
+          map.setView([+r.lat, +r.lon], 13);
+        }
+        box.hidden = true;
+        setTimeout(frameToView, 350);
+      });
+      box.appendChild(b);
+    }
+  } catch {
+    box.innerHTML = '<button disabled>Search unavailable</button>';
+  }
+}
+
+/* ── readouts ────────────────────────────────────────────────────────── */
+
+function onAreaChanged() {
+  if (!state.bbox) return;
+  const bb = state.bbox;
+  $('bboxOut').textContent =
+    `${bb.south.toFixed(4)}, ${bb.west.toFixed(4)} → ${bb.north.toFixed(4)}, ${bb.east.toFixed(4)}`;
+
+  // The frame drives the sheet height unless the sheet is driving the frame.
+  if (!$('lockAspect').checked) {
+    const h = num('sheetW') / mercatorAspect(bb);
+    if (isFinite(h) && h > 0) $('sheetH').value = h.toFixed(1);
+  }
+  updateDerived();
+}
+
+function updateDerived() {
+  if (!state.bbox) return;
+  const g = groundSize(state.bbox);
+  const W = num('sheetW'), H = num('sheetH');
+  $('groundOut').textContent = `${fmtDist(g.width)} × ${fmtDist(g.height)}`;
+  $('scaleOut').textContent = fmtScale(g.width * 1000 / W);
+
+  const th = state.thresholds;
+  const t = num('thickness');
+  if (th.length >= 2) {
+    const steps = th.slice(1).map((v, i) => v - th[i]);
+    const lo = Math.min(...steps), hi = Math.max(...steps);
+    const even = hi - lo < 1e-6;
+    $('intervalOut').textContent = even
+      ? `${lo.toFixed(1)} m` : `${lo.toFixed(1)}–${hi.toFixed(1)} m`;
+    const mean = steps.reduce((a, b) => a + b, 0) / steps.length;
+    const horiz = g.width / W;                 // metres of ground per mm across the sheet
+    const vert = mean / t;                     // metres of altitude per mm up the stack
+    const x = horiz / vert;
+    $('exaggOut').textContent = (x < 10 ? x.toFixed(2) : x.toFixed(1)) + '×';
+  } else {
+    $('intervalOut').textContent = '—';
+    $('exaggOut').textContent = '—';
+  }
+  const n = state.sheets.length || (th.length + ($('baseFull').checked ? 1 : 0));
+  $('stackOut').textContent = n ? `${(n * t).toFixed(1)} mm (${n} sheets)` : '—';
+}
+
+/* ── elevation ───────────────────────────────────────────────────────── */
+
+$('demSource').addEventListener('change', () => {
+  const v = $('demSource').value;
+  $('demTokenRow').hidden = v !== 'mapbox';
+  $('demCustomRow').hidden = v !== 'custom';
+});
+
+$('fetchDem').addEventListener('click', async () => {
+  if (!state.bbox) return;
+  state.abort?.abort();
+  const ctrl = new AbortController();
+  state.abort = ctrl;
+
+  setStatus('Fetching elevation…', 'busy');
+  setProgress(0, 'Starting…');
+  try {
+    const srcKey = $('demSource').value;
+    const grid = await fetchElevationGrid({
+      bbox: state.bbox,
+      gridW: parseInt($('gridRes').value, 10),
+      source: srcKey === 'custom' ? $('demCustomEnc').value : srcKey,
+      token: $('demToken').value.trim(),
+      urlTemplate: srcKey === 'custom' ? $('demCustomUrl').value.trim() : null,
+      onProgress: setProgress,
+      signal: ctrl.signal,
+    });
+
+    state.grid = grid;
+    applyTerrainSmoothing();
+    $('gridOut').textContent = `${grid.width} × ${grid.height}`;
+    $('elevOut').textContent = `${Math.round(grid.min)} – ${Math.round(grid.max)} m`;
+    $('tilesOut').textContent = `${grid.tiles} @ z${grid.zoom}` + (grid.missing ? ` (${grid.missing} missing)` : '');
+
+    generateThresholds();
+    await rebuild();
+    switchView('stack');
+    setStatus('Elevation loaded', 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus(e.message || 'Elevation fetch failed', 'err');
+  } finally {
+    hideProgress();
+  }
+});
+
+function applyTerrainSmoothing() {
+  if (!state.grid) return;
+  const g = state.grid;
+  const values = smoothGrid(g.values, g.width, g.height, parseInt($('smoothTerrain').value, 10));
+  state.smoothed = { values, width: g.width, height: g.height };
+  state.hist = histogram(values);
+}
+
+/**
+ * Rasterise each sheet's material to a coverage mask.
+ *
+ * Features get placed by testing these masks rather than by looking up the
+ * elevation grid: by the time a layer is cut it has been smoothed, simplified
+ * and had its small islands dropped, so its edge no longer follows the raw
+ * iso-line. Testing the geometry that actually gets cut keeps every engraved
+ * river and lake on a sheet that really has material under it.
+ */
+const MASK_PPMM = 4;
+
+function buildMasks(sheets, W, H) {
+  const mw = Math.max(1, Math.ceil(W * MASK_PPMM));
+  const mh = Math.max(1, Math.ceil(H * MASK_PPMM));
+  const c = document.createElement('canvas');
+  c.width = mw; c.height = mh;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+
+  return sheets.map(s => {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, mw, mh);
+    ctx.setTransform(MASK_PPMM, 0, 0, MASK_PPMM, 0, 0);
+    const p = new Path2D();
+    for (const rings of s.polygons) {
+      for (const r of rings) {
+        if (r.length < 2) continue;
+        p.moveTo(r[0][0], r[0][1]);
+        for (let i = 1; i < r.length; i++) p.lineTo(r[i][0], r[i][1]);
+        p.closePath();
+      }
+    }
+    ctx.fillStyle = '#fff';
+    ctx.fill(p, 'evenodd');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const px = ctx.getImageData(0, 0, mw, mh).data;
+    const m = new Uint8Array(mw * mh);
+    for (let i = 0; i < m.length; i++) m[i] = px[i * 4 + 3] > 127 ? 1 : 0;
+    return { m, mw, mh };
+  });
+}
+
+function inMask(mask, x, y) {
+  const px = Math.floor(x * MASK_PPMM), py = Math.floor(y * MASK_PPMM);
+  if (px < 0 || py < 0 || px >= mask.mw || py >= mask.mh) return false;
+  return mask.m[py * mask.mw + px] === 1;
+}
+
+/** Point where segment a→b leaves the mask, to well under the laser's tolerance. */
+function edgeCross(a, b, mask) {
+  let lo = 0, hi = 1;
+  for (let k = 0; k < 14; k++) {
+    const m = (lo + hi) / 2;
+    if (inMask(mask, a[0] + (b[0] - a[0]) * m, a[1] + (b[1] - a[1]) * m)) lo = m; else hi = m;
+  }
+  return [a[0] + (b[0] - a[0]) * lo, a[1] + (b[1] - a[1]) * lo];
+}
+
+/* ── thresholds ──────────────────────────────────────────────────────── */
+
+function generateThresholds() {
+  if (!state.smoothed) return;
+  const g = state.smoothed;
+  let min = Infinity, max = -Infinity;
+  for (const v of g.values) { if (v < min) min = v; if (v > max) max = v; }
+  const floor = Number.isFinite(num('thrFloor')) ? num('thrFloor') : min;
+  const ceil = Number.isFinite(num('thrCeil')) ? num('thrCeil') : max;
+
+  state.thresholds = makeThresholds({
+    mode: $('thrMode').value,
+    count: parseInt($('nLevels').value, 10),
+    min: floor, max: ceil, values: g.values,
+  });
+  writeThresholds();
+}
+
+function writeThresholds() {
+  $('thrList').value = state.thresholds.map(t => t.toFixed(1)).join('\n');
+  renderHistogram($('histo'), state.hist, state.thresholds);
+  updateDerived();
+}
+
+function readThresholds() {
+  state.thresholds = $('thrList').value
+    .split(/[\n,;]+/).map(s => parseFloat(s.trim()))
+    .filter(Number.isFinite).sort((a, b) => a - b);
+  renderHistogram($('histo'), state.hist, state.thresholds);
+  updateDerived();
+}
+
+$('genThresholds').addEventListener('click', () => { generateThresholds(); scheduleRebuild(); });
+$('thrList').addEventListener('change', () => { readThresholds(); scheduleRebuild(); });
+
+$('histo').addEventListener('click', e => {
+  if (!state.hist) return;
+  const rect = $('histo').getBoundingClientRect();
+  const frac = (e.clientX - rect.left) / rect.width;
+  const { min, max } = state.hist;
+  const val = min + frac * (max - min);
+  const tolPx = 7 / rect.width * (max - min);
+  const hit = state.thresholds.findIndex(t => Math.abs(t - val) < tolPx);
+  if (hit >= 0) state.thresholds.splice(hit, 1);
+  else state.thresholds.push(val);
+  state.thresholds.sort((a, b) => a - b);
+  writeThresholds();
+  scheduleRebuild();
+});
+
+/* ── build ───────────────────────────────────────────────────────────── */
+
+/**
+ * Chamfer distance transform: for every pixel of material, how far it is from
+ * the nearest edge. Anything off the canvas counts as an edge, so a hole is
+ * never placed hard against the sheet boundary.
+ */
+function distanceTransform(mask, mw, mh) {
+  const INF = 1e9;
+  const d = new Float32Array(mw * mh);
+  for (let i = 0; i < d.length; i++) d[i] = mask[i] ? INF : 0;
+  const at = (x, y) => (x < 0 || y < 0 || x >= mw || y >= mh) ? 0 : d[y * mw + x];
+
+  for (let y = 0; y < mh; y++) for (let x = 0; x < mw; x++) {
+    const i = y * mw + x;
+    if (!mask[i]) continue;
+    d[i] = Math.min(d[i], at(x - 1, y) + 3, at(x, y - 1) + 3,
+                          at(x - 1, y - 1) + 4, at(x + 1, y - 1) + 4);
+  }
+  for (let y = mh - 1; y >= 0; y--) for (let x = mw - 1; x >= 0; x--) {
+    const i = y * mw + x;
+    if (!mask[i]) continue;
+    d[i] = Math.min(d[i], at(x + 1, y) + 3, at(x, y + 1) + 3,
+                          at(x + 1, y + 1) + 4, at(x - 1, y + 1) + 4);
+  }
+  for (let i = 0; i < d.length; i++) d[i] /= 3 * MASK_PPMM;   // -> millimetres
+  return d;
+}
+
+/**
+ * Everywhere on a layer a hole could go, thinned to the best spot in each
+ * `cell`-millimetre square and sorted deepest first. One pass over the mask,
+ * so choosing several holes costs no more scanning than choosing one.
+ * Also returns the layer's extent, for judging how far apart holes should sit.
+ */
+function pinCandidates(mask, dt, need, cell = 4) {
+  const step = cell * MASK_PPMM;
+  const cols = Math.ceil(mask.mw / step);
+  const best = new Map();
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+
+  for (let y = 0; y < mask.mh; y++) {
+    for (let x = 0; x < mask.mw; x++) {
+      const i = y * mask.mw + x;
+      if (!mask.m[i]) continue;
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+
+      const c = dt[i];
+      if (c < need) continue;
+      const k = Math.floor(y / step) * cols + Math.floor(x / step);
+      const cur = best.get(k);
+      if (!cur || c > cur.c) best.set(k, { c, x: (x + 0.5) / MASK_PPMM, y: (y + 0.5) / MASK_PPMM });
+    }
+  }
+  return {
+    list: [...best.values()].sort((a, b) => b.c - a.c),
+    diag: isFinite(x0) ? Math.hypot(x1 - x0, y1 - y0) / MASK_PPMM : 0,
+  };
+}
+
+/**
+ * Site the dowel holes.
+ *
+ * Working from the summit down means a hole is first placed deep inside the
+ * smallest layer; because the layers nest, that same hole then passes through
+ * every layer beneath it. A layer only asks for a new hole when it does not
+ * already contain enough, so the high ground gets the alignment it needs
+ * without peppering the base with dowels.
+ */
+function choosePins(sheets, masks, opts) {
+  const rNeed = opts.dia / 2 + opts.margin;
+  const dts = masks.map(m => distanceTransform(m.m, m.mw, m.mh));
+  const pins = [];
+
+  for (let li = sheets.length - 1; li >= 0; li--) {
+    const mask = masks[li], dt = dts[li];
+    const { list, diag } = pinCandidates(mask, dt, rNeed);
+    if (!list.length) continue;
+
+    // Don't drop a hole into a thin sliver just to buy separation: insist it be
+    // at least half as deep as the best spot this layer has to offer, and give
+    // up spacing before depth.
+    const deep = Math.max(rNeed, list[0].c * 0.5);
+    const inside = pins.filter(p => (dt[pixIndex(mask, p)] ?? 0) >= rNeed);
+
+    // A layer is located once it has enough holes AND they are far enough apart
+    // to stop it pivoting. Holes inherited from the summit sit close together,
+    // so the broad lower sheets ask for another one further out.
+    const spread = () => {
+      let m = 0;
+      for (let i = 0; i < inside.length; i++)
+        for (let j = i + 1; j < inside.length; j++)
+          m = Math.max(m, Math.hypot(inside[i][0] - inside[j][0], inside[i][1] - inside[j][1]));
+      return m;
+    };
+    const located = () => inside.length >= opts.perLayer &&
+                          (inside.length < 2 || spread() >= diag * 0.3);
+
+    while (!located() && pins.length < opts.max && inside.length < opts.perLayer + 2) {
+      const clear = (c, sep) => inside.every(q => Math.hypot(c.x - q[0], c.y - q[1]) >= sep);
+      let pick = null;
+      for (const [minC, sep] of [[deep, diag * 0.35], [deep, diag * 0.15], [deep, 0], [rNeed, 0]]) {
+        pick = list.find(c => c.c >= minC && clear(c, sep));   // sorted, so this is the deepest
+        if (pick) break;
+      }
+      if (!pick) break;                     // nowhere left on this layer takes a hole
+      pins.push([pick.x, pick.y]);
+      inside.push([pick.x, pick.y]);
+    }
+  }
+  return { pins, dts, rNeed };
+}
+
+const pixIndex = (mask, p) => {
+  const x = Math.floor(p[0] * MASK_PPMM), y = Math.floor(p[1] * MASK_PPMM);
+  if (x < 0 || y < 0 || x >= mask.mw || y >= mask.mh) return -1;
+  return y * mask.mw + x;
+};
+
+async function rebuild() {
+  if (!state.smoothed || !state.thresholds.length) return;
+  const W = num('sheetW'), H = num('sheetH');
+  const kerf = num('kerf') || 0;
+
+  const layers = buildLayers(state.smoothed, {
+    thresholds: state.thresholds,
+    sheetW: W, sheetH: H,
+    smoothCurve: parseInt($('smoothCurve').value, 10),
+    simplifyTol: num('simplifyTol'),
+    minFeature: num('minFeature'),
+    minHole: num('minHole'),
+    kerf,
+  });
+
+  const sheets = [];
+  if ($('baseFull').checked) {
+    const k = kerf / 2;
+    sheets.push({
+      name: 'base', threshold: null,
+      polygons: k > 0 ? [[[[-k, -k], [W + k, -k], [W + k, H + k], [-k, H + k], [-k, -k]]]]
+                      : sheetRect(W, H),
+    });
+  }
+  for (const l of layers) {
+    if (!l.polygons.length) continue;
+    sheets.push({ name: `${Math.round(l.threshold)}m`, threshold: l.threshold, polygons: l.polygons });
+  }
+
+  sheets.forEach((s, i) => {
+    s.index = i;
+    s.file = `${String(i + 1).padStart(2, '0')}_${s.name}`;
+    s.guide = $('engraveNext').checked && sheets[i + 1] ? sheets[i + 1].polygons : null;
+  });
+
+  state.sheets = sheets;
+  state.masks = buildMasks(sheets, W, H);
+
+  if ($('pinHoles').checked) {
+    const { pins, dts, rNeed } = choosePins(sheets, state.masks, {
+      dia: num('pinDia'),
+      margin: num('pinMargin'),
+      perLayer: parseInt($('pinsPerLayer').value, 10) || 2,
+      max: parseInt($('pinMax').value, 10) || 10,
+    });
+    state.pins = pins;
+    sheets.forEach((s, i) => {
+      s.pins = pins.filter(p => {
+        const ix = pixIndex(state.masks[i], p);
+        return ix >= 0 && dts[i][ix] >= rNeed;
+      });
+    });
+  } else {
+    state.pins = [];
+    for (const s of sheets) s.pins = null;
+  }
+
+  assignFeatures();
+
+  $('layersOut').textContent = String(sheets.length);
+  $('nodesOut').textContent = sheets
+    .reduce((a, s) => a + s.polygons.reduce((b, p) => b + p.reduce((c, r) => c + r.length, 0), 0), 0)
+    .toLocaleString('en-GB');
+  $('dlZip').disabled = $('dlCombined').disabled = !sheets.length;
+  updateDerived();
+  redraw();
+}
+
+let rebuildTimer = null;
+function scheduleRebuild() {
+  clearTimeout(rebuildTimer);
+  rebuildTimer = setTimeout(() => { rebuild().catch(e => setStatus(e.message, 'err')); }, 280);
+}
+
+/* ── OSM features ────────────────────────────────────────────────────── */
+
+const OSM_IDS = Object.keys(FEATURE_GROUPS).map(g => ['osm_' + g, g]);
+
+$('fetchOsm').addEventListener('click', async () => {
+  if (!state.bbox) return;
+  const groups = Object.fromEntries(OSM_IDS.map(([id, g]) => [g, $(id).checked]));
+  if (!Object.values(groups).some(Boolean)) { setStatus('Pick at least one feature type', 'err'); return; }
+
+  state.abort?.abort();
+  const ctrl = new AbortController();
+  state.abort = ctrl;
+  setStatus('Querying OpenStreetMap…', 'busy');
+  setProgress(0.1, 'Overpass can take a while for large areas…');
+  try {
+    state.features = await fetchOsmFeatures({
+      bbox: state.bbox, groups,
+      sheetW: num('sheetW'), sheetH: num('sheetH'),
+      simplifyTol: Math.max(0.05, num('simplifyTol')),
+      minLength: 1.2,
+      onProgress: setProgress, signal: ctrl.signal,
+    });
+    const counts = Object.entries(state.features)
+      .map(([g, d]) => `${FEATURE_GROUPS[g].label.toLowerCase()} ${d.shapes.length}`).join(', ');
+    $('osmOut').textContent = counts || 'nothing found';
+    assignFeatures();
+    redraw();
+    setStatus('OSM features loaded', 'ok');
+  } catch (e) {
+    console.error(e);
+    setStatus(e.message || 'Overpass failed', 'err');
+  } finally {
+    hideProgress();
+  }
+});
+
+/** Distribute fetched features across the sheets according to the placement rule. */
+function assignFeatures() {
+  const sheets = state.sheets;
+  if (!sheets.length) return;
+  for (const s of sheets) { s.features = null; s._fpaths = null; }
+  state.overlay = null;
+  if (!state.features || !Object.keys(state.features).length) return;
+
+  const mode = $('osmPlacement').value;
+
+  if (mode === 'top') {
+    sheets[sheets.length - 1].features = state.features;
+    return;
+  }
+  if (mode === 'separate') {
+    state.overlay = {
+      name: 'overlay', file: `${String(sheets.length + 1).padStart(2, '0')}_overlay`,
+      threshold: null, polygons: sheetRect(num('sheetW'), num('sheetH')),
+      features: state.features,
+    };
+    return;
+  }
+
+  // byheight — engrave each feature on the topmost sheet with material there,
+  // which is the surface you would actually see it on in the finished stack.
+  const masks = state.masks || buildMasks(sheets, num('sheetW'), num('sheetH'));
+  const bucket = sheets.map(() => ({}));
+  const push = (i, g, kind, shape) => {
+    if (i < 0 || i >= sheets.length) return;
+    (bucket[i][g] ||= { kind, shapes: [] }).shapes.push(shape);
+  };
+  const sheetForPoint = (x, y) => {
+    for (let i = masks.length - 1; i >= 0; i--) if (inMask(masks[i], x, y)) return i;
+    return -1;
+  };
+
+  /**
+   * Walk a path and cut it wherever it crosses onto a different layer, ending
+   * each piece exactly on the cut edge. Consecutive pieces meet at that point,
+   * so a river still reads as continuous down the finished stack and no engrave
+   * line runs out over material that is about to be cut away.
+   */
+  const splitByLayer = shape => {
+    const pieces = [];
+    let cur = sheetForPoint(shape[0][0], shape[0][1]);
+    let run = [shape[0]];
+    for (let i = 1; i < shape.length; i++) {
+      const p = shape[i];
+      const si = sheetForPoint(p[0], p[1]);
+      if (si === cur) { run.push(p); continue; }
+
+      // Layers nest, so climbing to a higher one keeps you on this material;
+      // only a step down actually leaves it and needs trimming.
+      const leaves = cur >= 0 && !inMask(masks[cur], p[0], p[1]);
+      const boundary = leaves ? edgeCross(shape[i - 1], p, masks[cur]) : p;
+
+      run.push(boundary);
+      if (run.length > 1) pieces.push([cur, run]);
+      run = leaves ? [boundary, p] : [p];
+      cur = si;
+    }
+    if (run.length > 1) pieces.push([cur, run]);
+    return pieces;
+  };
+
+  for (const [g, data] of Object.entries(state.features)) {
+    for (const shape of data.shapes) {
+      const pieces = splitByLayer(shape);
+      // A lake that sits within one terrace stays a closed shape. One that
+      // straddles a step becomes an arc on each terrace it crosses — which is
+      // what it physically does, since those shorelines are at different heights.
+      if (data.kind === 'polygon' && pieces.length === 1) push(pieces[0][0], g, 'polygon', shape);
+      else for (const [idx, pts] of pieces) push(idx, g, 'line', pts);
+    }
+  }
+  sheets.forEach((s, i) => { s.features = Object.keys(bucket[i]).length ? bucket[i] : null; });
+}
+
+/* ── views ───────────────────────────────────────────────────────────── */
+
+function switchView(v) {
+  state.view = v;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === v));
+  document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el.id === 'view-' + v));
+  $('sheetNav').hidden = v !== 'sheet';
+  if (v === 'map') setTimeout(() => { map.invalidateSize(); drawFrame(); }, 0);
+  redraw();
+}
+document.querySelectorAll('.tab').forEach(t =>
+  t.addEventListener('click', () => switchView(t.dataset.view)));
+
+function redraw() {
+  const model = {
+    sheetW: num('sheetW'), sheetH: num('sheetH'),
+    sheets: state.sheets, pinRadius: num('pinDia') / 2,
+  };
+  const has = state.sheets.length > 0;
+  $('stackEmpty').hidden = has;
+  $('sheetEmpty').hidden = has;
+  if (!has) return;
+
+  if (state.view === 'stack') renderStack($('stackCanvas'), model);
+  if (state.view === 'sheet') {
+    state.sheetIndex = Math.max(0, Math.min(state.sheets.length - 1, state.sheetIndex));
+    renderSheet($('sheetCanvas'), model, state.sheetIndex);
+    const s = state.sheets[state.sheetIndex];
+    $('sheetLabel').textContent =
+      `${state.sheetIndex + 1}/${state.sheets.length} · ${s.threshold === null ? 'base' : Math.round(s.threshold) + ' m'}`;
+  }
+}
+$('prevSheet').addEventListener('click', () => { state.sheetIndex--; redraw(); });
+$('nextSheet').addEventListener('click', () => { state.sheetIndex++; redraw(); });
+window.addEventListener('keydown', e => {
+  if (state.view !== 'sheet' || e.target.matches('input,textarea,select')) return;
+  if (e.key === 'ArrowLeft') { state.sheetIndex--; redraw(); }
+  if (e.key === 'ArrowRight') { state.sheetIndex++; redraw(); }
+});
+window.addEventListener('resize', () => { redraw(); renderHistogram($('histo'), state.hist, state.thresholds); });
+
+/* ── export ──────────────────────────────────────────────────────────── */
+
+function exportMeta() {
+  const g = groundSize(state.bbox);
+  const W = num('sheetW'), H = num('sheetH'), t = num('thickness');
+  const th = state.thresholds;
+  const steps = th.slice(1).map((v, i) => v - th[i]);
+  const mean = steps.length ? steps.reduce((a, b) => a + b, 0) / steps.length : 0;
+  return {
+    generator: 'Topo Layers',
+    bounds: `S ${state.bbox.south.toFixed(5)}, W ${state.bbox.west.toFixed(5)}, ` +
+            `N ${state.bbox.north.toFixed(5)}, E ${state.bbox.east.toFixed(5)}`,
+    sheet: `${W} × ${H} mm`,
+    material: `${t} mm`,
+    ground: `${fmtDist(g.width)} × ${fmtDist(g.height)}`,
+    scale: fmtScale(g.width * 1000 / W),
+    levels: th.map(v => Math.round(v) + 'm').join(', '),
+    verticalExaggeration: mean ? +(((g.width / W) / (mean / t)).toFixed(2)) + '×' : null,
+    elevationSource: DEM_SOURCES[$('demSource').value]?.label || 'custom',
+    units: 'millimetres (1 SVG user unit = 1 mm)',
+  };
+}
+
+function allSheets() {
+  return state.overlay ? [...state.sheets, state.overlay] : state.sheets;
+}
+
+function buildFiles() {
+  const W = num('sheetW'), H = num('sheetH');
+  const meta = exportMeta();
+  const pinRadius = num('pinDia') / 2;
+  const sheets = allSheets();
+  const files = sheets.map(s => ({
+    name: `${s.file}.svg`,
+    data: sheetSVG(s, { W, H, pinRadius, meta: { ...meta, layer: s.file } }),
+  }));
+
+  files.push({ name: 'all-layers-in-register.svg', data: stackedSVG(sheets, { W, H, meta }) });
+  files.push({ name: 'all-layers-nested.svg', data: tiledSVG(sheets, { W, H, gap: 10, meta: { ...meta, pinRadius } }) });
+  if ($('makeJig').checked)
+    files.push({ name: 'alignment-jig.svg',
+                 data: jigSVG(state.sheets, { W, H, pins: state.pins || [], pinRadius, meta }) });
+  files.push({ name: 'manifest.json', data: JSON.stringify({ ...meta, sheets: sheets.map(s => ({
+    file: s.file + '.svg', threshold_m: s.threshold, polygons: s.polygons.length,
+  })) }, null, 2) });
+  files.push({ name: 'README.txt', data: readmeText(meta, sheets) });
+  return files;
+}
+
+function readmeText(meta, sheets) {
+  const L = [];
+  L.push('MULTI-LAYER TOPOGRAPHIC MAP', '='.repeat(46), '');
+  for (const [k, v] of Object.entries(meta)) {
+    if (v === null || k === 'generator') continue;
+    L.push(`${k.replace(/([A-Z])/g, ' $1').toLowerCase().padEnd(24)} ${v}`);
+  }
+  L.push('', 'SHEETS (cut in this order, glue bottom to top)', '-'.repeat(46));
+  sheets.forEach(s => L.push(
+    `  ${(s.file + '.svg').padEnd(26)} ${s.threshold === null ? 'base — full sheet' : 'ground above ' + Math.round(s.threshold) + ' m'}`));
+  L.push('',
+    'STROKE COLOURS', '-'.repeat(46),
+    '  #000000  black    CUT — the part outline (and pin holes)',
+    '  #B4B4B4  grey     ENGRAVE — outline of the layer that sits on top;',
+    '                    use it to position the next piece while gluing',
+    '  #00E0E0  cyan     lakes and reservoirs',
+    '  #0000FF  blue     rivers and streams',
+    '  #FF0000  red      roads',
+    '  #FF00FF  magenta  railways',
+    '  #FF8000  orange   buildings',
+    '  #00E000  green    woodland',
+    '',
+    'NOTES', '-'.repeat(46),
+    '  * 1 SVG user unit = 1 mm. Files carry a physical size, so they should',
+    '    import at true scale into LightBurn, Illustrator and Inkscape.',
+    '  * all-layers-nested.svg puts every sheet on one board for a single job.',
+    '  * all-layers-in-register.svg overlays them for checking alignment only.',
+    '  * If your laser software applies its own kerf offset, leave the kerf',
+    '    setting in the generator at 0 so it is not applied twice.',
+    '',
+    'Elevation: AWS Terrain Tiles (SRTM/EU-DEM and friends).',
+    'Features and basemap: (c) OpenStreetMap contributors, ODbL.');
+  return L.join('\n');
+}
+
+$('build').addEventListener('click', () => {
+  if (!state.smoothed) { setStatus('Fetch elevation first', 'err'); return; }
+  setStatus('Building…', 'busy');
+  setTimeout(async () => {
+    try { await rebuild(); setStatus(`${state.sheets.length} layers ready`, 'ok'); }
+    catch (e) { console.error(e); setStatus(e.message, 'err'); }
+  }, 10);
+});
+
+$('dlZip').addEventListener('click', () => {
+  try {
+    download(makeZip(buildFiles()), 'topo-layers.zip');
+    setStatus('ZIP downloaded', 'ok');
+  } catch (e) { console.error(e); setStatus(e.message, 'err'); }
+});
+
+$('dlCombined').addEventListener('click', () => {
+  const W = num('sheetW'), H = num('sheetH');
+  const svg = tiledSVG(allSheets(), { W, H, gap: 10, meta: exportMeta() });
+  download(new Blob([svg], { type: 'image/svg+xml' }), 'topo-layers-nested.svg');
+  setStatus('SVG downloaded', 'ok');
+});
+
+/* ── parameter wiring ────────────────────────────────────────────────── */
+
+$('smoothTerrain').addEventListener('input', () => {
+  $('smoothTerrainOut').textContent = $('smoothTerrain').value;
+  applyTerrainSmoothing();
+  renderHistogram($('histo'), state.hist, state.thresholds);
+  scheduleRebuild();
+});
+$('smoothCurve').addEventListener('input', () => {
+  $('smoothCurveOut').textContent = $('smoothCurve').value;
+  scheduleRebuild();
+});
+
+for (const id of ['simplifyTol', 'minFeature', 'minHole', 'kerf', 'baseFull',
+                  'engraveNext', 'pinHoles', 'pinDia', 'pinsPerLayer', 'pinMargin', 'pinMax'])
+  $(id).addEventListener('change', scheduleRebuild);
+
+$('osmPlacement').addEventListener('change', () => { assignFeatures(); redraw(); });
+
+for (const id of ['sheetW', 'sheetH']) {
+  $(id).addEventListener('change', () => {
+    if ($('lockAspect').checked) applySheetAspect();
+    updateDerived();
+    scheduleRebuild();
+  });
+}
+$('thickness').addEventListener('change', updateDerived);
+$('lockAspect').addEventListener('change', () => { if ($('lockAspect').checked) applySheetAspect(); });
+$('nLevels').addEventListener('change', () => { generateThresholds(); scheduleRebuild(); });
+$('thrMode').addEventListener('change', () => { generateThresholds(); scheduleRebuild(); });
+for (const id of ['thrFloor', 'thrCeil'])
+  $(id).addEventListener('change', () => { generateThresholds(); scheduleRebuild(); });
+
+/* ── go ──────────────────────────────────────────────────────────────── */
+
+$('fitFrame').addEventListener('click', frameToView);
+
+// Escape hatch for scripting from the console: inspect state, or grab the
+// generated files without going through the download button.
+window.topo = { state, rebuild, buildFiles, exportMeta, map };
+
+map.whenReady(() => setTimeout(() => { map.invalidateSize(); frameToView(); }, 60));
+renderHistogram($('histo'), null, []);
+setStatus('Pick an area, then fetch elevation');

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Topo Layers — multi-layer map art for laser cutting</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+
+<header id="topbar">
+  <h1>Topo&nbsp;Layers</h1>
+  <span class="sub">stacked topographic wall art &rarr; laser-ready SVG</span>
+  <div class="spacer"></div>
+  <div id="status" class="status idle">Ready</div>
+</header>
+
+<main id="app">
+
+  <!-- ───────────────────────── control panel ───────────────────────── -->
+  <aside id="panel">
+
+    <section class="grp" data-open="1">
+      <h2>1 · Area</h2>
+      <div class="body">
+        <p class="hint">Pan/zoom the map, then drag the frame or its corners. The frame is anchored to the ground, so it stays put as you pan.</p>
+        <div class="row">
+          <button id="fitFrame" class="btn sm">Frame to view</button>
+          <button id="searchBtn" class="btn sm">Search place…</button>
+        </div>
+        <div class="row" id="searchRow" hidden>
+          <input type="text" id="searchInput" placeholder="e.g. Snowdon, Wales" />
+          <button id="searchGo" class="btn sm">Go</button>
+        </div>
+        <div id="searchResults" class="results" hidden></div>
+        <dl class="kv">
+          <dt>Bounds</dt><dd id="bboxOut">—</dd>
+          <dt>Ground size</dt><dd id="groundOut">—</dd>
+          <dt>Scale</dt><dd id="scaleOut">—</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="grp" data-open="1">
+      <h2>2 · Sheet &amp; material</h2>
+      <div class="body">
+        <div class="row">
+          <label>Width <input type="number" id="sheetW" value="300" min="10" max="2000" step="1"><span class="u">mm</span></label>
+          <label>Height <input type="number" id="sheetH" value="200" min="10" max="2000" step="1"><span class="u">mm</span></label>
+        </div>
+        <label class="chk"><input type="checkbox" id="lockAspect"> Lock frame to sheet aspect ratio</label>
+        <p class="hint">Unlocked, the frame drives the sheet height. Locked, the sheet drives the frame.</p>
+        <div class="row">
+          <label>Material thickness <input type="number" id="thickness" value="3" min="0.1" max="50" step="0.1"><span class="u">mm</span></label>
+        </div>
+        <dl class="kv">
+          <dt>Contour interval</dt><dd id="intervalOut">—</dd>
+          <dt>Vertical exagg.</dt><dd id="exaggOut">—</dd>
+          <dt>Stack height</dt><dd id="stackOut">—</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="grp" data-open="1">
+      <h2>3 · Elevation</h2>
+      <div class="body">
+        <div class="row">
+          <label>Detail
+            <select id="gridRes">
+              <option value="256">256 px — draft</option>
+              <option value="512" selected>512 px — normal</option>
+              <option value="1024">1024 px — fine</option>
+              <option value="2048">2048 px — max</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label>Source
+            <select id="demSource">
+              <option value="terrarium">AWS Terrain Tiles (no key)</option>
+              <option value="mapbox">Mapbox Terrain-RGB (token)</option>
+              <option value="custom">Custom URL template</option>
+            </select>
+          </label>
+        </div>
+        <div class="row" id="demTokenRow" hidden>
+          <input type="text" id="demToken" placeholder="Mapbox access token">
+        </div>
+        <div class="row" id="demCustomRow" hidden>
+          <input type="text" id="demCustomUrl" placeholder="https://…/{z}/{x}/{y}.png">
+          <select id="demCustomEnc">
+            <option value="terrarium">terrarium</option>
+            <option value="mapbox">mapbox rgb</option>
+          </select>
+        </div>
+        <button id="fetchDem" class="btn primary wide">Fetch elevation</button>
+        <dl class="kv">
+          <dt>Samples</dt><dd id="gridOut">—</dd>
+          <dt>Elevation range</dt><dd id="elevOut">—</dd>
+          <dt>Tiles</dt><dd id="tilesOut">—</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="grp" data-open="1">
+      <h2>4 · Layer heights</h2>
+      <div class="body">
+        <canvas id="histo" height="110"></canvas>
+        <p class="hint">Elevation histogram. Click to add a level, click a marker to remove it.</p>
+        <div class="row">
+          <label>Levels <input type="number" id="nLevels" value="8" min="2" max="40" step="1"></label>
+          <label>Mode
+            <select id="thrMode">
+              <option value="equal">Equal interval</option>
+              <option value="quantile">Equal area</option>
+              <option value="round">Round numbers</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label>Floor <input type="number" id="thrFloor" placeholder="auto" step="1"><span class="u">m</span></label>
+          <label>Ceiling <input type="number" id="thrCeil" placeholder="auto" step="1"><span class="u">m</span></label>
+        </div>
+        <button id="genThresholds" class="btn wide">Generate levels</button>
+        <label class="lbl">Levels (metres, one per line)</label>
+        <textarea id="thrList" rows="6" spellcheck="false"></textarea>
+      </div>
+    </section>
+
+    <section class="grp" data-open="1">
+      <h2>5 · Geometry</h2>
+      <div class="body">
+        <label class="slider">Terrain smoothing <output id="smoothTerrainOut">1</output>
+          <input type="range" id="smoothTerrain" min="0" max="8" step="1" value="1"></label>
+        <label class="slider">Curve smoothing <output id="smoothCurveOut">2</output>
+          <input type="range" id="smoothCurve" min="0" max="4" step="1" value="2"></label>
+        <div class="row">
+          <label>Simplify <input type="number" id="simplifyTol" value="0.15" min="0" max="5" step="0.05"><span class="u">mm</span></label>
+          <label>Min feature <input type="number" id="minFeature" value="2" min="0" max="50" step="0.5"><span class="u">mm</span></label>
+        </div>
+        <div class="row">
+          <label>Min hole <input type="number" id="minHole" value="2" min="0" max="50" step="0.5"><span class="u">mm</span></label>
+          <label>Kerf <input type="number" id="kerf" value="0" min="0" max="1" step="0.01"><span class="u">mm</span></label>
+        </div>
+        <p class="hint">Kerf widens each part by half the beam width. Leave at&nbsp;0 if your laser software already applies kerf offset.</p>
+      </div>
+    </section>
+
+    <section class="grp" data-open="0">
+      <h2>6 · OSM features</h2>
+      <div class="body">
+        <p class="hint">Vector detail from OpenStreetMap, engraved on the layer it falls in (or all on one sheet).</p>
+        <div class="chks">
+          <label class="chk"><input type="checkbox" id="osm_water" checked> Lakes &amp; reservoirs</label>
+          <label class="chk"><input type="checkbox" id="osm_waterway" checked> Rivers &amp; streams</label>
+          <label class="chk"><input type="checkbox" id="osm_road"> Major roads</label>
+          <label class="chk"><input type="checkbox" id="osm_rail"> Railways</label>
+          <label class="chk"><input type="checkbox" id="osm_building"> Buildings</label>
+          <label class="chk"><input type="checkbox" id="osm_green"> Woodland</label>
+        </div>
+        <div class="row">
+          <label>Place on
+            <select id="osmPlacement">
+              <option value="byheight">Layer it sits on</option>
+              <option value="top">Top layer only</option>
+              <option value="separate">Separate overlay sheet</option>
+            </select>
+          </label>
+        </div>
+        <button id="fetchOsm" class="btn wide">Fetch OSM features</button>
+        <dl class="kv"><dt>Fetched</dt><dd id="osmOut">—</dd></dl>
+      </div>
+    </section>
+
+    <section class="grp" data-open="0">
+      <h2>7 · Assembly aids</h2>
+      <div class="body">
+        <label class="chk"><input type="checkbox" id="baseFull" checked> Bottom layer is the full sheet rectangle</label>
+        <label class="chk"><input type="checkbox" id="engraveNext" checked> Engrave outline of the layer above (glue guide)</label>
+        <label class="chk"><input type="checkbox" id="makeJig" checked> Include alignment jig sheet</label>
+        <label class="chk"><input type="checkbox" id="pinHoles"> Pin holes for alignment dowels</label>
+        <div class="row">
+          <label>Pin ⌀ <input type="number" id="pinDia" value="3" min="0.5" max="12" step="0.5"><span class="u">mm</span></label>
+          <label>Per layer <input type="number" id="pinsPerLayer" value="2" min="1" max="6" step="1"></label>
+        </div>
+        <div class="row">
+          <label>Margin <input type="number" id="pinMargin" value="2" min="0.5" max="20" step="0.5"><span class="u">mm</span></label>
+          <label>Max pins <input type="number" id="pinMax" value="10" min="2" max="24" step="1"></label>
+        </div>
+        <p class="hint">Holes are sited under the high ground first, deep inside the smallest layers, so one dowel carries as much of the stack as possible. Each sheet is only drilled where a hole clears its edges by the margin.</p>
+      </div>
+    </section>
+
+    <section class="grp" data-open="1">
+      <h2>8 · Export</h2>
+      <div class="body">
+        <button id="build" class="btn primary wide">Build layers</button>
+        <div class="row">
+          <button id="dlZip" class="btn wide" disabled>Download ZIP</button>
+          <button id="dlCombined" class="btn wide" disabled>Combined SVG</button>
+        </div>
+        <dl class="kv">
+          <dt>Layers</dt><dd id="layersOut">—</dd>
+          <dt>Total path nodes</dt><dd id="nodesOut">—</dd>
+        </dl>
+      </div>
+    </section>
+
+    <footer class="credits">
+      Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> ·
+      Features &amp; basemap: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors
+    </footer>
+  </aside>
+
+  <!-- ───────────────────────── preview area ───────────────────────── -->
+  <section id="stage">
+    <nav id="tabs">
+      <button class="tab active" data-view="map">Map</button>
+      <button class="tab" data-view="stack">Stacked</button>
+      <button class="tab" data-view="sheet">Sheets</button>
+      <div class="spacer"></div>
+      <div id="sheetNav" hidden>
+        <button id="prevSheet" class="btn sm">‹</button>
+        <span id="sheetLabel">—</span>
+        <button id="nextSheet" class="btn sm">›</button>
+      </div>
+    </nav>
+
+    <div id="views">
+      <div class="view active" id="view-map">
+        <div id="map"></div>
+        <div id="frame" hidden>
+          <div class="fh" data-h="nw"></div><div class="fh" data-h="ne"></div>
+          <div class="fh" data-h="sw"></div><div class="fh" data-h="se"></div>
+          <div class="fh e" data-h="n"></div><div class="fh e" data-h="s"></div>
+          <div class="fh e" data-h="w"></div><div class="fh e" data-h="e"></div>
+          <div class="fdim" id="frameDim"></div>
+        </div>
+        <div id="basemapPick">
+          <label class="chk"><input type="radio" name="bm" value="osm" checked> Standard</label>
+          <label class="chk"><input type="radio" name="bm" value="topo"> Topographic</label>
+        </div>
+      </div>
+
+      <div class="view" id="view-stack">
+        <canvas id="stackCanvas"></canvas>
+        <div class="empty" id="stackEmpty">Fetch elevation, then <em>Build layers</em>.</div>
+      </div>
+
+      <div class="view" id="view-sheet">
+        <canvas id="sheetCanvas"></canvas>
+        <div class="empty" id="sheetEmpty">Fetch elevation, then <em>Build layers</em>.</div>
+      </div>
+    </div>
+
+    <div id="progress" hidden><div class="bar"></div><span class="txt"></span></div>
+  </section>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
