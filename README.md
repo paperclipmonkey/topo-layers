@@ -6,7 +6,9 @@ choose the area, the aspect ratio, and exactly which elevations to split at.
 
 No build step, no npm install, no API keys.
 
-## Run it
+**→ [paperclipmonkey.github.io/topo-layers](https://paperclipmonkey.github.io/topo-layers/)**
+
+## Run it locally
 
 ```bash
 cd /Users/michaelwaterworth/map-generator && python3 -m http.server 8777
@@ -126,6 +128,17 @@ too small to take a hole at that margin is skipped rather than weakened.
 - Overpass will refuse very large areas, especially with buildings enabled.
 - Coastlines are handled implicitly: sea is below the 0 m level, so include a
   level at 0 to cut a shoreline.
+
+## Deploying
+
+The site is served from the `gh-pages` branch. To publish changes:
+
+```bash
+git push origin main && git push origin main:gh-pages
+```
+
+Note that the basemap and Overpass are volunteer-run services on a fair-use
+policy — fine for personal use, but don't point heavy traffic at them.
 
 ## Attribution
 
