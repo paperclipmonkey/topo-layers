@@ -70,11 +70,8 @@ function pinsMarkup(pins, r) {
 
 /* ── documents ───────────────────────────────────────────────────────── */
 
-/**
- * A single cuttable sheet.
- * @param sheet {name, polygons, guide?, features?, pins?}
- */
-export function sheetSVG(sheet, { W, H, pinRadius, meta }) {
+/** Everything that gets marked for one layer, in that layer's own coordinates. */
+function partBody(sheet, pinRadius) {
   let body = '';
   if (sheet.guide?.length)
     body += group('guide-next-layer', COLOURS.guide, `    <path d="${polygonsD(sheet.guide)}"/>\n`);
@@ -83,8 +80,15 @@ export function sheetSVG(sheet, { W, H, pinRadius, meta }) {
   // Cut last so it sits on top when previewed.
   if (sheet.polygons?.length)
     body += group('cut', COLOURS.cut, `    <path d="${polygonsD(sheet.polygons)}"/>\n`);
+  return body;
+}
 
-  return header(W, H, sheet.name, meta) + body + '</svg>\n';
+/**
+ * A single cuttable sheet.
+ * @param sheet {name, polygons, guide?, features?, pins?}
+ */
+export function sheetSVG(sheet, { W, H, pinRadius, meta }) {
+  return header(W, H, sheet.name, meta) + partBody(sheet, pinRadius) + '</svg>\n';
 }
 
 /** Every layer in register, one colour per layer — for checking alignment. */
@@ -99,25 +103,27 @@ export function stackedSVG(sheets, { W, H, meta }) {
   return header(W, H, 'All layers (in register)', meta) + body + '</svg>\n';
 }
 
-/** Every layer nested side by side on one big sheet, ready for a single job. */
-export function tiledSVG(sheets, { W, H, gap = 10, meta }) {
-  const cols = Math.max(1, Math.round(Math.sqrt(sheets.length * H / W)));
-  const rows = Math.ceil(sheets.length / cols);
-  const TW = cols * W + (cols + 1) * gap;
-  const TH = rows * H + (rows + 1) * gap;
+/**
+ * Place a part so its bounding box lands at (x, y) on the stock board.
+ * Rotating by 90° sweeps the part into negative x, so it is pushed back by its
+ * own height — which is exactly the width it occupies once turned.
+ */
+export function placementTransform({ x, y, rot, bbox }) {
+  return rot
+    ? `translate(${f(x + bbox.h)},${f(y)}) rotate(90) translate(${f(-bbox.x)},${f(-bbox.y)})`
+    : `translate(${f(x - bbox.x)},${f(y - bbox.y)})`;
+}
 
+/** One stock board with its packed parts, ready to cut as a single job. */
+export function nestSVG(nest, { stockW, stockH, pinRadius, meta, index, total }) {
   let body = '';
-  sheets.forEach((s, i) => {
-    const cx = gap + (i % cols) * (W + gap);
-    const cy = gap + Math.floor(i / cols) * (H + gap);
-    let inner = '';
-    if (s.guide?.length) inner += group('guide', COLOURS.guide, `      <path d="${polygonsD(s.guide)}"/>\n`);
-    inner += featuresMarkup(s.features).replace(/^ {2}/gm, '    ');
-    if (s.pins?.length) inner += pinsMarkup(s.pins, meta?.pinRadius || 1.5);
-    inner += group('cut', COLOURS.cut, `      <path d="${polygonsD(s.polygons)}"/>\n`);
-    body += `  <g id="${esc(s.name)}" transform="translate(${f(cx)},${f(cy)})">\n${inner}  </g>\n`;
-  });
-  return header(TW, TH, 'All layers, nested', meta) + body + '</svg>\n';
+  for (const pl of nest.placements) {
+    body += `  <g id="${esc(pl.sheet.file)}" transform="${placementTransform(pl)}">\n` +
+            partBody(pl.sheet, pinRadius) +
+            `  </g>\n`;
+  }
+  const title = total > 1 ? `Nesting — board ${index} of ${total}` : 'Nesting';
+  return header(stockW, stockH, title, { ...meta, board: `${index}/${total}` }) + body + '</svg>\n';
 }
 
 /**

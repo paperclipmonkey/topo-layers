@@ -160,6 +160,73 @@ export function renderSheet(canvas, model, index) {
   ctx.restore();
 }
 
+/** One stock board with its packed parts, as they will be cut. */
+export function renderNest(canvas, nest, model) {
+  const { stockW: W, stockH: H } = model;
+  if (!nest) return;
+  const { ctx, s, ox, oy } = fit(canvas, W, H, 30);
+
+  ctx.save();
+  ctx.translate(ox, oy);
+  ctx.scale(s, s);
+
+  ctx.fillStyle = '#171a1f';
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 0.7 / s;
+  ctx.strokeRect(0, 0, W, H);
+
+  for (const pl of nest.placements) {
+    ctx.save();
+    const b = pl.bbox;
+    if (pl.rot) {
+      ctx.translate(pl.x + b.h, pl.y);
+      ctx.rotate(Math.PI / 2);
+      ctx.translate(-b.x, -b.y);
+    } else {
+      ctx.translate(pl.x - b.x, pl.y - b.y);
+    }
+
+    const sheet = pl.sheet;
+    const p = sheet._path || (sheet._path = pathOf(sheet.polygons));
+    ctx.fillStyle = 'rgba(232,145,58,0.12)';
+    ctx.fill(p, 'evenodd');
+
+    if (sheet.guide?.length) {
+      ctx.strokeStyle = COLOURS.guide;
+      ctx.lineWidth = 0.3 / s;
+      ctx.globalAlpha = 0.6;
+      ctx.stroke(sheet._gpath || (sheet._gpath = pathOf(sheet.guide)));
+      ctx.globalAlpha = 1;
+    }
+    for (const [g, fp] of (sheet._fpaths || (sheet._fpaths = featurePaths(sheet.features)))) {
+      ctx.strokeStyle = COLOURS[g] || '#888';
+      ctx.lineWidth = 0.4 / s;
+      ctx.stroke(fp);
+    }
+    ctx.strokeStyle = '#f3f5f8';
+    ctx.lineWidth = 0.55 / s;
+    ctx.stroke(p);
+
+    if (sheet.pins?.length) {
+      ctx.lineWidth = 0.4 / s;
+      for (const [px, py] of sheet.pins) {
+        ctx.beginPath();
+        ctx.arc(px, py, model.pinRadius || 1.5, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    // label in unrotated screen space, so it stays readable
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = `${Math.max(3, 9 / s)}px ui-monospace, monospace`;
+    ctx.fillText(pl.sheet.file, pl.x + 1.5, pl.y + Math.max(4, 10 / s));
+  }
+
+  ctx.restore();
+}
+
 /** Elevation histogram with the current levels marked. */
 export function renderHistogram(canvas, hist, thresholds) {
   const dpr = window.devicePixelRatio || 1;

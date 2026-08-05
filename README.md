@@ -58,8 +58,8 @@ custom `{z}/{x}/{y}` tile URL in either encoding.
 
 | File | What it is |
 | --- | --- |
-| `01_base.svg`, `02_120m.svg`, … | one sheet per layer, bottom first |
-| `all-layers-nested.svg` | every sheet laid out on one board for a single job |
+| `nesting-01.svg`, … | **what you cut** — every layer packed onto stock boards |
+| `01_base.svg`, `02_120m.svg`, … | one sheet per layer, bottom first, each in its own file |
 | `all-layers-in-register.svg` | all layers overlaid, colour-coded — for checking alignment |
 | `alignment-jig.svg` | a board with every outline engraved, to position pieces while gluing |
 | `manifest.json`, `README.txt` | the exact parameters used, and cutting notes |
@@ -75,6 +75,25 @@ separates operations, which is how most laser software assigns layers:
 | `#00E0E0` / `#0000FF` | lakes / rivers |
 | `#FF0000` / `#FF00FF` | roads / railways |
 | `#FF8000` / `#00E000` | buildings / woodland |
+
+## Nesting
+
+Give it your stock size and it packs the layers onto as few boards as possible,
+so the whole piece cuts in one job instead of one file at a time.
+
+Each layer travels as a single rigid part — its glue-guide outline, engraved
+rivers and pin holes ride along with it — so only the part's own bounding box
+matters, not the full sheet it was drawn on. That is what makes the upper layers
+cheap to place: a summit layer occupying 40 × 30 mm is packed as 40 × 30 mm, not
+as a full sheet with a lot of empty space around it. Parts are placed by
+MaxRects best-short-side-fit, largest first, and may be turned 90° where that
+helps; anything engraved on a part turns with it.
+
+*Edge margin* keeps parts clear of the board edge, *part gap* keeps them clear
+of each other — set that to at least a couple of kerfs so neighbouring cuts do
+not run into one another. Anything too large for the stock is listed rather than
+silently dropped, so a base layer bigger than your board is a warning, not a
+missing file.
 
 ## Settings worth understanding
 

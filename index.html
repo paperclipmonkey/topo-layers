@@ -193,12 +193,33 @@
     </section>
 
     <section class="grp" data-open="1">
-      <h2>8 · Export</h2>
+      <h2>8 · Nesting</h2>
+      <div class="body">
+        <p class="hint">Packs the layers onto stock boards so the whole piece cuts in one job.</p>
+        <div class="row">
+          <label>Stock width <input type="number" id="stockW" value="600" min="20" max="3000" step="1"><span class="u">mm</span></label>
+          <label>Stock height <input type="number" id="stockH" value="400" min="20" max="3000" step="1"><span class="u">mm</span></label>
+        </div>
+        <div class="row">
+          <label>Edge margin <input type="number" id="stockMargin" value="5" min="0" max="60" step="0.5"><span class="u">mm</span></label>
+          <label>Part gap <input type="number" id="partSpacing" value="3" min="0" max="60" step="0.5"><span class="u">mm</span></label>
+        </div>
+        <label class="chk"><input type="checkbox" id="allowRotate" checked> Let parts rotate 90°</label>
+        <dl class="kv">
+          <dt>Boards needed</dt><dd id="nestOut">—</dd>
+          <dt>Material used</dt><dd id="nestUseOut">—</dd>
+        </dl>
+        <p class="hint warn" id="nestWarn" hidden></p>
+      </div>
+    </section>
+
+    <section class="grp" data-open="1">
+      <h2>9 · Export</h2>
       <div class="body">
         <button id="build" class="btn primary wide">Build layers</button>
         <div class="row">
           <button id="dlZip" class="btn wide" disabled>Download ZIP</button>
-          <button id="dlCombined" class="btn wide" disabled>Combined SVG</button>
+          <button id="dlNest" class="btn wide" disabled>Nesting only</button>
         </div>
         <dl class="kv">
           <dt>Layers</dt><dd id="layersOut">—</dd>
@@ -219,6 +240,7 @@
       <button class="tab active" data-view="map">Map</button>
       <button class="tab" data-view="stack">Stacked</button>
       <button class="tab" data-view="sheet">Sheets</button>
+      <button class="tab" data-view="nest">Nesting</button>
       <div class="spacer"></div>
       <div id="sheetNav" hidden>
         <button id="prevSheet" class="btn sm">‹</button>
@@ -251,6 +273,11 @@
       <div class="view" id="view-sheet">
         <canvas id="sheetCanvas"></canvas>
         <div class="empty" id="sheetEmpty">Fetch elevation, then <em>Build layers</em>.</div>
+      </div>
+
+      <div class="view" id="view-nest">
+        <canvas id="nestCanvas"></canvas>
+        <div class="empty" id="nestEmpty">Fetch elevation, then <em>Build layers</em>.</div>
       </div>
     </div>
 

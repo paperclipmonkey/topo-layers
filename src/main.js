@@ -3,8 +3,9 @@ import { groundSize, mercatorAspect, fmtDist, fmtScale,
 import { fetchElevationGrid, smoothGrid, histogram, DEM_SOURCES } from './terrain.js';
 import { makeThresholds, buildLayers, sheetRect } from './contour.js';
 import { fetchOsmFeatures, FEATURE_GROUPS } from './osm.js';
-import { sheetSVG, stackedSVG, tiledSVG, jigSVG } from './svg.js';
-import { renderStack, renderSheet, renderHistogram } from './preview.js';
+import { sheetSVG, stackedSVG, nestSVG, jigSVG } from './svg.js';
+import { packParts, polygonsBBox } from './nest.js';
+import { renderStack, renderSheet, renderNest, renderHistogram } from './preview.js';
 import { makeZip, download } from './zip.js';
 
 const $ = id => document.getElementById(id);
@@ -23,7 +24,9 @@ const state = {
   pins: [],
   features: null,
   overlay: null,
+  nesting: null,
   sheetIndex: 0,
+  nestIndex: 0,
   view: 'map',
   abort: null,
 };
@@ -606,12 +609,13 @@ async function rebuild() {
   }
 
   assignFeatures();
+  computeNesting();
 
   $('layersOut').textContent = String(sheets.length);
   $('nodesOut').textContent = sheets
     .reduce((a, s) => a + s.polygons.reduce((b, p) => b + p.reduce((c, r) => c + r.length, 0), 0), 0)
     .toLocaleString('en-GB');
-  $('dlZip').disabled = $('dlCombined').disabled = !sheets.length;
+  $('dlZip').disabled = $('dlNest').disabled = !sheets.length;
   updateDerived();
   redraw();
 }
@@ -736,13 +740,64 @@ function assignFeatures() {
   sheets.forEach((s, i) => { s.features = Object.keys(bucket[i]).length ? bucket[i] : null; });
 }
 
+/* ── nesting ─────────────────────────────────────────────────────────── */
+
+/**
+ * Pack the layers onto stock boards. Each layer travels as one rigid part —
+ * its guide outline, engraving and pin holes ride along with it — so only the
+ * part's own bounding box matters, not the full sheet it was drawn on. That is
+ * what makes the summit layers cheap to place.
+ */
+function computeNesting() {
+  const sheets = allSheets();
+  if (!sheets.length) { state.nesting = null; return; }
+
+  const bboxes = new Map();
+  const parts = [];
+  for (const s of sheets) {
+    const bb = polygonsBBox(s.polygons);
+    if (!bb || bb.w <= 0 || bb.h <= 0) continue;
+    bboxes.set(s.file, bb);
+    parts.push({ id: s.file, w: bb.w, h: bb.h });
+  }
+
+  const res = packParts(parts, {
+    stockW: num('stockW'), stockH: num('stockH'),
+    margin: num('stockMargin'), spacing: num('partSpacing'),
+    allowRotate: $('allowRotate').checked,
+  });
+
+  const byId = new Map(sheets.map(s => [s.file, s]));
+  state.nesting = {
+    boards: res.sheets.map(b => ({
+      placements: b.placements.map(p => ({ ...p, sheet: byId.get(p.id), bbox: bboxes.get(p.id) })),
+    })),
+    oversize: res.oversize,
+    utilisation: res.utilisation,
+  };
+
+  const n = state.nesting.boards.length;
+  $('nestOut').textContent = n ? `${n} × ${num('stockW')}×${num('stockH')} mm` : '—';
+  $('nestUseOut').textContent = n ? `${(state.nesting.utilisation * 100).toFixed(0)}%` : '—';
+
+  const warn = $('nestWarn');
+  if (res.oversize.length) {
+    warn.hidden = false;
+    warn.textContent = `Too big for this stock: ${res.oversize.join(', ')}. ` +
+      `Use a larger board, or reduce the sheet size in step 2.`;
+  } else {
+    warn.hidden = true;
+  }
+  state.nestIndex = Math.min(state.nestIndex, Math.max(0, n - 1));
+}
+
 /* ── views ───────────────────────────────────────────────────────────── */
 
 function switchView(v) {
   state.view = v;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === v));
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el.id === 'view-' + v));
-  $('sheetNav').hidden = v !== 'sheet';
+  $('sheetNav').hidden = !(v === 'sheet' || v === 'nest');
   if (v === 'map') setTimeout(() => { map.invalidateSize(); drawFrame(); }, 0);
   redraw();
 }
@@ -752,14 +807,17 @@ document.querySelectorAll('.tab').forEach(t =>
 function redraw() {
   const model = {
     sheetW: num('sheetW'), sheetH: num('sheetH'),
+    stockW: num('stockW'), stockH: num('stockH'),
     sheets: state.sheets, pinRadius: num('pinDia') / 2,
   };
   const has = state.sheets.length > 0;
   $('stackEmpty').hidden = has;
   $('sheetEmpty').hidden = has;
+  $('nestEmpty').hidden = has;
   if (!has) return;
 
   if (state.view === 'stack') renderStack($('stackCanvas'), model);
+
   if (state.view === 'sheet') {
     state.sheetIndex = Math.max(0, Math.min(state.sheets.length - 1, state.sheetIndex));
     renderSheet($('sheetCanvas'), model, state.sheetIndex);
@@ -767,13 +825,29 @@ function redraw() {
     $('sheetLabel').textContent =
       `${state.sheetIndex + 1}/${state.sheets.length} · ${s.threshold === null ? 'base' : Math.round(s.threshold) + ' m'}`;
   }
+
+  if (state.view === 'nest') {
+    const boards = state.nesting?.boards || [];
+    if (!boards.length) { $('sheetLabel').textContent = 'no boards'; return; }
+    state.nestIndex = Math.max(0, Math.min(boards.length - 1, state.nestIndex));
+    renderNest($('nestCanvas'), boards[state.nestIndex], model);
+    $('sheetLabel').textContent =
+      `board ${state.nestIndex + 1}/${boards.length} · ${boards[state.nestIndex].placements.length} parts`;
+  }
 }
-$('prevSheet').addEventListener('click', () => { state.sheetIndex--; redraw(); });
-$('nextSheet').addEventListener('click', () => { state.sheetIndex++; redraw(); });
+
+const stepView = d => {
+  if (state.view === 'nest') state.nestIndex += d;
+  else state.sheetIndex += d;
+  redraw();
+};
+$('prevSheet').addEventListener('click', () => stepView(-1));
+$('nextSheet').addEventListener('click', () => stepView(1));
 window.addEventListener('keydown', e => {
-  if (state.view !== 'sheet' || e.target.matches('input,textarea,select')) return;
-  if (e.key === 'ArrowLeft') { state.sheetIndex--; redraw(); }
-  if (e.key === 'ArrowRight') { state.sheetIndex++; redraw(); }
+  if ((state.view !== 'sheet' && state.view !== 'nest') ||
+      e.target.matches('input,textarea,select')) return;
+  if (e.key === 'ArrowLeft') stepView(-1);
+  if (e.key === 'ArrowRight') stepView(1);
 });
 window.addEventListener('resize', () => { redraw(); renderHistogram($('histo'), state.hist, state.thresholds); });
 
@@ -804,6 +878,20 @@ function allSheets() {
   return state.overlay ? [...state.sheets, state.overlay] : state.sheets;
 }
 
+/** One SVG per stock board, named so they cut in order. */
+function nestFiles() {
+  const boards = state.nesting?.boards || [];
+  const meta = { ...exportMeta(), stock: `${num('stockW')} × ${num('stockH')} mm`,
+                 materialUsed: `${((state.nesting?.utilisation || 0) * 100).toFixed(0)}%` };
+  return boards.map((b, i) => ({
+    name: boards.length > 1 ? `nesting-${String(i + 1).padStart(2, '0')}.svg` : 'nesting.svg',
+    data: nestSVG(b, {
+      stockW: num('stockW'), stockH: num('stockH'),
+      pinRadius: num('pinDia') / 2, meta, index: i + 1, total: boards.length,
+    }),
+  }));
+}
+
 function buildFiles() {
   const W = num('sheetW'), H = num('sheetH');
   const meta = exportMeta();
@@ -815,13 +903,22 @@ function buildFiles() {
   }));
 
   files.push({ name: 'all-layers-in-register.svg', data: stackedSVG(sheets, { W, H, meta }) });
-  files.push({ name: 'all-layers-nested.svg', data: tiledSVG(sheets, { W, H, gap: 10, meta: { ...meta, pinRadius } }) });
+  for (const f of nestFiles()) files.push(f);
   if ($('makeJig').checked)
     files.push({ name: 'alignment-jig.svg',
                  data: jigSVG(state.sheets, { W, H, pins: state.pins || [], pinRadius, meta }) });
-  files.push({ name: 'manifest.json', data: JSON.stringify({ ...meta, sheets: sheets.map(s => ({
-    file: s.file + '.svg', threshold_m: s.threshold, polygons: s.polygons.length,
-  })) }, null, 2) });
+  files.push({ name: 'manifest.json', data: JSON.stringify({
+    ...meta,
+    nesting: {
+      stock: `${num('stockW')} × ${num('stockH')} mm`,
+      boards: state.nesting?.boards.length || 0,
+      materialUsed: `${((state.nesting?.utilisation || 0) * 100).toFixed(0)}%`,
+      tooLargeForStock: state.nesting?.oversize || [],
+    },
+    sheets: sheets.map(s => ({
+      file: s.file + '.svg', threshold_m: s.threshold, polygons: s.polygons.length,
+    })),
+  }, null, 2) });
   files.push({ name: 'README.txt', data: readmeText(meta, sheets) });
   return files;
 }
@@ -851,7 +948,9 @@ function readmeText(meta, sheets) {
     'NOTES', '-'.repeat(46),
     '  * 1 SVG user unit = 1 mm. Files carry a physical size, so they should',
     '    import at true scale into LightBurn, Illustrator and Inkscape.',
-    '  * all-layers-nested.svg puts every sheet on one board for a single job.',
+    '  * nesting-NN.svg is what you actually cut: every layer packed onto stock',
+    '    boards. Some parts are turned 90 degrees to save material; whatever is',
+    '    engraved on a part is turned with it, so each one stays self-consistent.',
     '  * all-layers-in-register.svg overlays them for checking alignment only.',
     '  * If your laser software applies its own kerf offset, leave the kerf',
     '    setting in the generator at 0 so it is not applied twice.',
@@ -877,11 +976,15 @@ $('dlZip').addEventListener('click', () => {
   } catch (e) { console.error(e); setStatus(e.message, 'err'); }
 });
 
-$('dlCombined').addEventListener('click', () => {
-  const W = num('sheetW'), H = num('sheetH');
-  const svg = tiledSVG(allSheets(), { W, H, gap: 10, meta: exportMeta() });
-  download(new Blob([svg], { type: 'image/svg+xml' }), 'topo-layers-nested.svg');
-  setStatus('SVG downloaded', 'ok');
+$('dlNest').addEventListener('click', () => {
+  const files = nestFiles();
+  if (!files.length) { setStatus('Nothing to nest yet', 'err'); return; }
+  if (files.length === 1) {
+    download(new Blob([files[0].data], { type: 'image/svg+xml' }), files[0].name);
+  } else {
+    download(makeZip(files), 'topo-layers-nesting.zip');
+  }
+  setStatus(`Nesting downloaded (${files.length} board${files.length > 1 ? 's' : ''})`, 'ok');
 });
 
 /* ── parameter wiring ────────────────────────────────────────────────── */
@@ -902,6 +1005,9 @@ for (const id of ['simplifyTol', 'minFeature', 'minHole', 'kerf', 'baseFull',
   $(id).addEventListener('change', scheduleRebuild);
 
 $('osmPlacement').addEventListener('change', () => { assignFeatures(); redraw(); });
+
+for (const id of ['stockW', 'stockH', 'stockMargin', 'partSpacing', 'allowRotate'])
+  $(id).addEventListener('change', () => { computeNesting(); redraw(); });
 
 for (const id of ['sheetW', 'sheetH']) {
   $(id).addEventListener('change', () => {
