@@ -11,12 +11,14 @@ No build step, no npm install, no API keys.
 ## Run it locally
 
 ```bash
-cd /Users/michaelwaterworth/map-generator && python3 -m http.server 8777
+cd /Users/michaelwaterworth/map-generator && python3 serve.py
 ```
 
-Then open <http://localhost:8777>. It needs to be served over HTTP rather than
+Then open <http://localhost:8781>. It needs to be served over HTTP rather than
 opened as a `file://` URL, because the browser blocks cross-origin tile reads
-from `file://`.
+from `file://`. `serve.py` is just `http.server` with caching turned off — with
+caching on, an edited module keeps running from cache while the page reloads
+around it, which looks exactly like a code change having no effect.
 
 ## Where the data comes from
 
@@ -35,6 +37,10 @@ You can swap the elevation source for Mapbox Terrain-RGB (paste a token) or any
 custom `{z}/{x}/{y}` tile URL in either encoding.
 
 ## How it works
+
+The panel walks you through it: the four sections that are actually a sequence
+show a **do this / done** marker, and a bar at the bottom always offers the one
+action that comes next. Everything else is optional detail you can ignore.
 
 1. **Area** — pan/zoom, then drag the frame or its corners. The frame is
    anchored to the ground, so it stays over the same terrain while you pan. Any
@@ -62,6 +68,7 @@ custom `{z}/{x}/{y}` tile URL in either encoding.
 | `01_base.svg`, `02_120m.svg`, … | one sheet per layer, bottom first, each in its own file |
 | `all-layers-in-register.svg` | all layers overlaid, colour-coded — for checking alignment |
 | `alignment-jig.svg` | a board with every outline engraved, to position pieces while gluing |
+| `points-key.csv` | number → name, sheet and coordinates for imported points |
 | `manifest.json`, `README.txt` | the exact parameters used, and cutting notes |
 
 SVGs are in millimetre user units with a physical `width`/`height`, so they
@@ -75,6 +82,66 @@ separates operations, which is how most laser software assigns layers:
 | `#00E0E0` / `#0000FF` | lakes / rivers |
 | `#FF0000` / `#FF00FF` | roads / railways |
 | `#FF8000` / `#00E000` | buildings / woodland |
+| `#8000FF` / `#FF0080` | place names / imported points |
+
+## Lettering and your own points
+
+Place names and peaks come from OSM and are engraved onto whichever layer is the
+visible surface there. They are set in a **single-stroke font** built into the
+app: the laser traces each letter's centre line once rather than clearing a
+filled interior, which is far quicker to burn, stays legible down to about 2 mm,
+and needs no font file, so the marks are identical on any machine. Labels are
+set in capitals — the cartographic convention, and markedly clearer engraved
+small. A label is never split across a layer boundary, and where two collide the
+less prominent one is dropped.
+
+**GeoJSON import** takes Point, LineString and Polygon features. Points are
+engraved as numbered markers on the layer they sit on, and the export includes
+`points-key.csv` tying each number back to its name, sheet, sheet coordinates,
+latitude/longitude and any custom properties from the file. Numbers are assigned
+in document order *before* testing whether a point falls on the sheet, so moving
+the frame never renumbers anything — which matters when a separate survey sheet
+already cites those numbers. Points outside the frame keep their number and are
+marked `off-sheet` in the CSV.
+
+## Showing dolines and other closed depressions
+
+For karst, the thing you want to see is the closed depressions — dolines,
+shakeholes, sinks — and the default level modes are bad at it. A closed
+depression only appears in the stack when a level falls strictly between its
+floor and its **spill point**, the lowest saddle it would overflow. Below the
+floor there is no ring at all; above the spill the contour opens out and merges
+into the hillside. A shallow doline sitting between two evenly-spaced levels is
+therefore invisible no matter how many layers you cut.
+
+*Show depressions* mode finds them properly. The terrain is flooded until every
+cell drains to the edge (Priority-Flood); wherever the filled surface sits above
+the real one is a closed depression, and the fill height is exactly its spill
+elevation. Levels are then placed to put rings inside as many as possible,
+weighted by depth and extent so a real doline outranks a dimple.
+
+**Depression emphasis** is the control that matters. Spending every level on
+depressions flatters the count and ruins the piece: the levels all pile into the
+narrow bands where depressions live, the middle of the range gets no contour at
+all, and you end up with detailed pockmarks in one featureless slab. So only
+that fraction of the levels chases depressions; the rest are spread evenly and
+hold the shape of the open ground. On a Mendip test area with 20 levels:
+
+| Mode | Dolines shown | Rings |
+| --- | --- | --- |
+| Equal interval | 7 / 9 | 7 |
+| Equal area | 6 / 9 | 6 |
+| Show depressions (50% emphasis) | **9 / 9** | **18** |
+
+The readout under the levels tells you what any mode is achieving, so you can
+compare rather than guess.
+
+Two caveats. Keep **terrain smoothing at 0** for this — smoothing flattens
+shallow depressions out of existence before they can be found. And detection is
+limited by the DEM: the open terrain tiles resolve roughly 5–30 m on the ground,
+which finds sizeable dolines but not small shakeholes. If you have LIDAR (in the
+UK, Environment Agency 1 m DTM), serve it as `{z}/{x}/{y}` terrarium tiles and
+point the custom source at it — that is where this mode really pays off.
 
 ## Nesting
 

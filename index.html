@@ -115,6 +115,7 @@
               <option value="equal">Equal interval</option>
               <option value="quantile">Equal area</option>
               <option value="round">Round numbers</option>
+              <option value="depression">Show depressions</option>
             </select>
           </label>
         </div>
@@ -122,7 +123,13 @@
           <label>Floor <input type="number" id="thrFloor" placeholder="auto" step="1"><span class="u">m</span></label>
           <label>Ceiling <input type="number" id="thrCeil" placeholder="auto" step="1"><span class="u">m</span></label>
         </div>
+        <label class="slider" id="emphasisRow" hidden>Depression emphasis <output id="emphasisOut">50%</output>
+          <input type="range" id="emphasis" min="0" max="90" step="5" value="50"></label>
         <button id="genThresholds" class="btn wide">Generate levels</button>
+        <dl class="kv">
+          <dt>Closed depressions</dt><dd id="dolineOut">—</dd>
+        </dl>
+        <p class="hint" id="dolineHint" hidden>A doline only appears if a level falls between its floor and its spill point. Keep terrain smoothing low or shallow ones get flattened away before they can be found.</p>
         <label class="lbl">Levels (metres, one per line)</label>
         <textarea id="thrList" rows="6" spellcheck="false"></textarea>
       </div>

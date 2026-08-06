@@ -2,6 +2,7 @@ import { groundSize, mercatorAspect, fmtDist, fmtScale,
          worldSize, lon2x, lat2y, y2lat } from './geo.js';
 import { fetchElevationGrid, smoothGrid, histogram, DEM_SOURCES } from './terrain.js';
 import { makeThresholds, buildLayers, sheetRect } from './contour.js';
+import { findDepressions, optimiseLevels, countRendered } from './depression.js';
 import { fetchOsmFeatures, FEATURE_GROUPS, makeProjector } from './osm.js';
 import { textPaths, textWidth } from './font.js';
 import { parseGeoJSON, markerPaths, pointsCSV } from './geojson.js';
@@ -399,18 +400,47 @@ function generateThresholds() {
   const floor = Number.isFinite(num('thrFloor')) ? num('thrFloor') : min;
   const ceil = Number.isFinite(num('thrCeil')) ? num('thrCeil') : max;
 
-  state.thresholds = makeThresholds({
-    mode: $('thrMode').value,
-    count: parseInt($('nLevels').value, 10),
-    min: floor, max: ceil, values: g.values,
-  });
+  const mode = $('thrMode').value;
+  const count = parseInt($('nLevels').value, 10);
+
+  if (mode === 'depression') {
+    state.thresholds = optimiseLevels(g.values, g.width, g.height, {
+      count, depressions: depressionsFor(g),
+      emphasis: parseInt($('emphasis').value, 10) / 100,
+    });
+  } else {
+    state.thresholds = makeThresholds({ mode, count, min: floor, max: ceil, values: g.values });
+  }
   writeThresholds();
+}
+
+/** Depressions for the current smoothed grid, cached — the fill is not cheap. */
+function depressionsFor(g) {
+  if (state.depCache?.values === g.values) return state.depCache.list;
+  const list = findDepressions(g.values, g.width, g.height, { minDepth: 0.4, minCells: 5 });
+  state.depCache = { values: g.values, list };
+  return list;
+}
+
+/** Report how much of the karst the current levels actually reveal. */
+function updateDolineReadout() {
+  const g = state.smoothed;
+  const showHint = $('thrMode').value === 'depression';
+  $('dolineHint').hidden = !showHint;
+  $('emphasisRow').hidden = !showHint;
+  if (!g) { $('dolineOut').textContent = '—'; return; }
+
+  const dep = depressionsFor(g);
+  if (!dep.length) { $('dolineOut').textContent = 'none found'; return; }
+  const { shown, total, rings } = countRendered(dep, state.thresholds);
+  $('dolineOut').textContent = `${shown}/${total} shown · ${rings} rings`;
 }
 
 function writeThresholds() {
   $('thrList').value = state.thresholds.map(t => t.toFixed(1)).join('\n');
   renderHistogram($('histo'), state.hist, state.thresholds);
   updateDerived();
+  updateDolineReadout();
 }
 
 function readThresholds() {
@@ -419,6 +449,7 @@ function readThresholds() {
     .filter(Number.isFinite).sort((a, b) => a - b);
   renderHistogram($('histo'), state.hist, state.thresholds);
   updateDerived();
+  updateDolineReadout();
 }
 
 $('genThresholds').addEventListener('click', () => { generateThresholds(); scheduleRebuild(); });
@@ -583,9 +614,16 @@ async function rebuild() {
                       : sheetRect(W, H),
     });
   }
+  // Depression mode can put levels well under a metre apart, so whole-metre
+  // names would give two different sheets the same label.
+  const gaps = state.thresholds.slice(1).map((t, i) => t - state.thresholds[i]);
+  const tightest = gaps.length ? Math.min(...gaps) : Infinity;
+  const dp = tightest < 0.1 ? 2 : tightest < 1 ? 1 : 0;
+  state.levelDP = dp;
+
   for (const l of layers) {
     if (!l.polygons.length) continue;
-    sheets.push({ name: `${Math.round(l.threshold)}m`, threshold: l.threshold, polygons: l.polygons });
+    sheets.push({ name: `${l.threshold.toFixed(dp)}m`, threshold: l.threshold, polygons: l.polygons });
   }
 
   sheets.forEach((s, i) => {
@@ -948,7 +986,7 @@ function redraw() {
     renderSheet($('sheetCanvas'), model, state.sheetIndex);
     const s = state.sheets[state.sheetIndex];
     $('sheetLabel').textContent =
-      `${state.sheetIndex + 1}/${state.sheets.length} · ${s.threshold === null ? 'base' : Math.round(s.threshold) + ' m'}`;
+      `${state.sheetIndex + 1}/${state.sheets.length} · ${s.threshold === null ? 'base' : s.threshold.toFixed(state.levelDP || 0) + ' m'}`;
   }
 
   if (state.view === 'nest') {
@@ -1060,7 +1098,7 @@ function readmeText(meta, sheets) {
   }
   L.push('', 'SHEETS (cut in this order, glue bottom to top)', '-'.repeat(46));
   sheets.forEach(s => L.push(
-    `  ${(s.file + '.svg').padEnd(26)} ${s.threshold === null ? 'base — full sheet' : 'ground above ' + Math.round(s.threshold) + ' m'}`));
+    `  ${(s.file + '.svg').padEnd(28)} ${s.threshold === null ? 'base — full sheet' : 'ground above ' + s.threshold.toFixed(state.levelDP || 0) + ' m'}`));
   L.push('',
     'STROKE COLOURS', '-'.repeat(46),
     '  #000000  black    CUT — the part outline (and pin holes)',
@@ -1209,6 +1247,11 @@ $('thickness').addEventListener('change', updateDerived);
 $('lockAspect').addEventListener('change', () => { if ($('lockAspect').checked) applySheetAspect(); });
 $('nLevels').addEventListener('change', () => { generateThresholds(); scheduleRebuild(); });
 $('thrMode').addEventListener('change', () => { generateThresholds(); scheduleRebuild(); });
+$('emphasis').addEventListener('input', () => {
+  $('emphasisOut').textContent = $('emphasis').value + '%';
+  generateThresholds();
+  scheduleRebuild();
+});
 for (const id of ['thrFloor', 'thrCeil'])
   $(id).addEventListener('change', () => { generateThresholds(); scheduleRebuild(); });
 
