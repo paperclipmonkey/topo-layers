@@ -186,6 +186,8 @@
           <label>Max labels <input type="number" id="labelMax" value="25" min="0" max="300" step="1"></label>
         </div>
         <label class="chk"><input type="checkbox" id="labelDot" checked> Mark the spot with a dot</label>
+        <label class="chk"><input type="checkbox" id="labelClear" checked> Keep names readable from above</label>
+        <dl class="kv"><dt>Names engraved</dt><dd id="labelOut">—</dd></dl>
         <p class="hint">Names are engraved on whichever layer is the visible surface there, in a single-stroke font that cuts as centre lines. Set in capitals — far more readable engraved small.</p>
       </div>
     </section>
@@ -299,6 +301,7 @@
       <button class="tab" data-view="stack">Stacked</button>
       <button class="tab" data-view="sheet">Sheets</button>
       <button class="tab" data-view="nest">Nesting</button>
+      <button class="tab" data-view="three">3D</button>
       <div class="spacer"></div>
       <div id="sheetNav" hidden>
         <button id="prevSheet" class="btn sm">‹</button>
@@ -336,6 +339,16 @@
       <div class="view" id="view-nest">
         <canvas id="nestCanvas"></canvas>
         <div class="empty" id="nestEmpty">Fetch elevation, then <em>Build layers</em>.</div>
+      </div>
+
+      <div class="view" id="view-three">
+        <canvas id="threeCanvas"></canvas>
+        <div class="empty" id="threeEmpty">Fetch elevation, then <em>Build layers</em>.</div>
+        <div id="threeBar">
+          <label class="chk"><input type="checkbox" id="spin"> Spin</label>
+          <button id="resetView" class="btn sm">Reset view</button>
+          <span class="tip">drag to turn · scroll to zoom</span>
+        </div>
       </div>
     </div>
 

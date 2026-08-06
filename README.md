@@ -95,6 +95,22 @@ set in capitals — the cartographic convention, and markedly clearer engraved
 small. A label is never split across a layer boundary, and where two collide the
 less prominent one is dropped.
 
+**Keep names readable from above** is worth understanding, because it trades
+coverage for legibility. A name engraved on a layer is only visible where that
+layer is not covered by the plate above it, and with a dozen layers those
+exposed terraces are narrow bands — so a name at its natural position very often
+runs half onto thin air or disappears under the next plate. With the option on,
+each name is tried at a range of offsets around its point and at up to two
+smaller sizes, looking for somewhere it sits complete on a single visible
+terrace; anything that still has nowhere to go is dropped rather than engraved
+broken, and the panel tells you how many. The dot stays at the true location on
+whatever layer is exposed *there*, which is not necessarily the layer the name
+moved to. On a 12-layer test this took the proportion of lettering falling off
+its terrace from 33% to under 1%, at the cost of 2 names in 12.
+
+Turn it off to engrave every name at its exact position and accept the
+clipping.
+
 **GeoJSON import** takes Point, LineString and Polygon features. Points are
 engraved as numbered markers on the layer they sit on, and the export includes
 `points-key.csv` tying each number back to its name, sheet, sheet coordinates,
@@ -142,6 +158,21 @@ limited by the DEM: the open terrain tiles resolve roughly 5–30 m on the groun
 which finds sizeable dolines but not small shakeholes. If you have LIDAR (in the
 UK, Environment Agency 1 m DTM), serve it as `{z}/{x}/{y}` terrarium tiles and
 point the custom source at it — that is where this mode really pays off.
+
+## Checking it in 3D
+
+The **3D** tab builds the stack from the layers and the material thickness and
+lets you turn it around — drag to spin, scroll to zoom, or leave it spinning.
+Worth doing before you cut: it shows how much relief you will actually get,
+which is usually less than people expect. Thirteen layers of 3 mm ply is 39 mm
+of stack on a 300 mm piece, and seeing that is a better guide than any number.
+
+There is no 3D library behind it. The layers nest strictly — each sits wholly
+inside and above the one below — so with the camera above the stack, drawing
+bottom plate to top plate is exactly correct painter's order, and no depth
+buffer is needed. Within a plate the walls are drawn first and the top face over
+them, which hides the back walls for free: a back wall projects into the
+interior of its own top face, while a front wall projects clear of it.
 
 ## Nesting
 

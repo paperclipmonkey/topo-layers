@@ -9,6 +9,7 @@ import { parseGeoJSON, markerPaths, pointsCSV } from './geojson.js';
 import { sheetSVG, stackedSVG, nestSVG, jigSVG } from './svg.js';
 import { packParts, polygonsBBox } from './nest.js';
 import { renderStack, renderSheet, renderNest, renderHistogram } from './preview.js';
+import { render3D } from './render3d.js';
 import { makeZip, download } from './zip.js';
 
 const $ = id => document.getElementById(id);
@@ -34,6 +35,7 @@ const state = {
   nesting: null,
   sheetIndex: 0,
   nestIndex: 0,
+  view3d: { yaw: -0.62, tilt: 0.72, zoom: 1 },
   view: 'map',
   abort: null,
 };
@@ -378,6 +380,31 @@ function inMask(mask, x, y) {
   const px = Math.floor(x * MASK_PPMM), py = Math.floor(y * MASK_PPMM);
   if (px < 0 || py < 0 || px >= mask.mw || py >= mask.mh) return false;
   return mask.m[py * mask.mw + px] === 1;
+}
+
+/**
+ * The part of each layer you can actually see from above: its own material,
+ * minus whatever the layer above covers up. Lettering has to sit entirely
+ * within one of these or it disappears under the next plate.
+ */
+function buildExposed(masks) {
+  return masks.map((mk, i) => {
+    const above = masks[i + 1];
+    const m = new Uint8Array(mk.m.length);
+    for (let k = 0; k < m.length; k++) m[k] = mk.m[k] && !(above && above.m[k]) ? 1 : 0;
+    return { m, mw: mk.mw, mh: mk.mh };
+  });
+}
+
+/** Is this whole rectangle inside the mask? */
+function boxInMask(mask, x0, y0, x1, y1, step = 0.4) {
+  for (let y = y0; y < y1 + step; y += step) {
+    const yy = Math.min(y, y1);
+    for (let x = x0; x < x1 + step; x += step) {
+      if (!inMask(mask, Math.min(x, x1), yy)) return false;
+    }
+  }
+  return true;
 }
 
 /** Point where segment a→b leaves the mask, to well under the laser's tolerance. */
@@ -860,25 +887,75 @@ function assignFeatures() {
     const size = num('labelSize');
     const limit = parseInt($('labelMax').value, 10) || 0;
     const dot = $('labelDot').checked;
-    let drawn = 0;
+    const keepClear = $('labelClear').checked && mode === 'byheight';
+    const exposed = keepClear ? buildExposed(masks) : null;
+    let drawn = 0, skipped = 0;
+
     for (const p of state.places) {
       if (drawn >= limit) break;
-      const i = resolve(sheetForPoint(p.x, p.y));
-      if (mode !== 'separate' && i < 0) continue;
+      const anchor = sheetForPoint(p.x, p.y);
+      if (mode !== 'separate' && anchor < 0) continue;
 
       const w = textWidth(p.name, size);
       if (w > W - 2) continue;                       // no room for it at this size
-      const cx = Math.max(w / 2 + 1, Math.min(W - w / 2 - 1, p.x));
-      const by = p.y - size * 0.55;                  // sit the name above its dot
-      const box = [cx - w / 2 - 0.7, by - size - 0.7, cx + w / 2 + 0.7, by + 0.7];
-      if (!free(box)) continue;                      // already something there
-      taken.push(box);
 
-      const strokes = textPaths(p.name, cx, by, size, { anchor: 'middle' });
-      if (dot) strokes.push(...markerPaths(p.x, p.y, Math.max(0.4, size * 0.16), 'circle'));
-      engrave('place', i, strokes);
+      // Hunt for somewhere the name sits complete on one visible terrace. With
+      // many layers the terraces are narrow bands, so a full-width name often
+      // will not fit anywhere near its point at full size — hence the search
+      // over offsets *and* a little shrinking before giving up.
+      let placed = null;
+      const sizes = exposed ? [size, size * 0.82, size * 0.68] : [size];
+
+      outer:
+      for (const sz of sizes) {
+        const ww = textWidth(p.name, sz), half = ww / 2;
+        if (ww > W - 2) continue;
+        for (const dy of [-0.55, 1.5, -2.1, 2.8, -3.7, 4.2]) {
+          for (const dx of [0, 1, -1, 2, -2]) {
+            const cx = Math.max(half + 1, Math.min(W - half - 1, p.x + dx * (half + sz)));
+            const by = Math.max(sz + 1, Math.min(H - 1, p.y + dy * sz));
+            // the box has to allow for descenders, or a Q or comma pokes out
+            const box = [cx - half - 0.6, by - sz - 0.6, cx + half + 0.6, by + sz * 0.2 + 0.6];
+            if (!free(box)) continue;
+            if (!exposed) { placed = { cx, by, sz, box, layer: resolve(anchor) }; break outer; }
+            for (let i = anchor; i >= 0; i--) {
+              if (boxInMask(exposed[i], box[0], box[1], box[2], box[3])) {
+                placed = { cx, by, sz, box, layer: i };
+                break outer;
+              }
+            }
+          }
+        }
+      }
+
+      // Nothing fits cleanly. With "readable from above" on, a name is dropped
+      // rather than engraved half onto thin air or under the plate above.
+      if (!placed) {
+        if (keepClear) { skipped++; continue; }
+        const half = w / 2;
+        const cx = Math.max(half + 1, Math.min(W - half - 1, p.x));
+        const by = p.y - size * 0.55;
+        const box = [cx - half - 0.6, by - size - 0.6, cx + half + 0.6, by + size * 0.2 + 0.6];
+        if (!free(box)) continue;
+        placed = { cx, by, sz: size, box, layer: resolve(anchor) };
+      }
+
+      taken.push(placed.box);
+      const target = mode === 'top' ? sheets.length - 1 : placed.layer;
+      engrave('place', target, textPaths(p.name, placed.cx, placed.by, placed.sz, { anchor: 'middle' }));
+
+      // The dot marks the actual spot, so it belongs on whatever layer is
+      // exposed *there* — which is not necessarily the one the name moved to.
+      if (dot) {
+        const at = mode === 'top' ? sheets.length - 1 : (mode === 'separate' ? target : anchor);
+        engrave('place', at, markerPaths(p.x, p.y, Math.max(0.4, size * 0.16), 'circle'));
+      }
       drawn++;
     }
+    state.labelStats = { drawn, skipped };
+    $('labelOut').textContent = skipped
+      ? `${drawn} · ${skipped} had nowhere clear`
+      : String(drawn);
   }
 
   if (state.geoPoints?.length) {
@@ -974,6 +1051,7 @@ function switchView(v) {
   document.querySelectorAll('.view').forEach(el => el.classList.toggle('active', el.id === 'view-' + v));
   $('sheetNav').hidden = !(v === 'sheet' || v === 'nest');
   if (v === 'map') setTimeout(() => { map.invalidateSize(); drawFrame(); }, 0);
+  if (v === 'three' && $('spin').checked && !spinFrame) spinFrame = requestAnimationFrame(spinLoop);
   redraw();
 }
 document.querySelectorAll('.tab').forEach(t =>
@@ -983,13 +1061,17 @@ function redraw() {
   const model = {
     sheetW: num('sheetW'), sheetH: num('sheetH'),
     stockW: num('stockW'), stockH: num('stockH'),
+    thickness: num('thickness'),
     sheets: state.sheets, pinRadius: num('pinDia') / 2,
   };
   const has = state.sheets.length > 0;
   $('stackEmpty').hidden = has;
   $('sheetEmpty').hidden = has;
   $('nestEmpty').hidden = has;
+  $('threeEmpty').hidden = has;
   if (!has) return;
+
+  if (state.view === 'three') render3D($('threeCanvas'), model, state.view3d);
 
   if (state.view === 'stack') renderStack($('stackCanvas'), model);
 
@@ -1010,6 +1092,52 @@ function redraw() {
       `board ${state.nestIndex + 1}/${boards.length} · ${boards[state.nestIndex].placements.length} parts`;
   }
 }
+
+/* ── 3D turntable ────────────────────────────────────────────────────── */
+
+const threeCanvas = $('threeCanvas');
+let orbit = null;
+
+threeCanvas.addEventListener('pointerdown', e => {
+  orbit = { x: e.clientX, y: e.clientY, yaw: state.view3d.yaw, tilt: state.view3d.tilt };
+  threeCanvas.setPointerCapture(e.pointerId);
+  $('spin').checked = false;
+});
+threeCanvas.addEventListener('pointermove', e => {
+  if (!orbit) return;
+  state.view3d.yaw = orbit.yaw + (e.clientX - orbit.x) * 0.008;
+  state.view3d.tilt = Math.max(0.12, Math.min(Math.PI / 2,
+                        orbit.tilt + (e.clientY - orbit.y) * 0.006));
+  redraw();
+});
+const endOrbit = e => {
+  if (!orbit) return;
+  orbit = null;
+  try { threeCanvas.releasePointerCapture(e.pointerId); } catch {}
+};
+threeCanvas.addEventListener('pointerup', endOrbit);
+threeCanvas.addEventListener('pointercancel', endOrbit);
+threeCanvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  state.view3d.zoom = Math.max(0.3, Math.min(6, state.view3d.zoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+  redraw();
+}, { passive: false });
+
+$('resetView').addEventListener('click', () => {
+  state.view3d = { yaw: -0.62, tilt: 0.72, zoom: 1 };
+  redraw();
+});
+
+let spinFrame = null;
+function spinLoop() {
+  if (!$('spin').checked || state.view !== 'three') { spinFrame = null; return; }
+  state.view3d.yaw += 0.006;
+  redraw();
+  spinFrame = requestAnimationFrame(spinLoop);
+}
+$('spin').addEventListener('change', () => {
+  if ($('spin').checked && !spinFrame) spinFrame = requestAnimationFrame(spinLoop);
+});
 
 const stepView = d => {
   if (state.view === 'nest') state.nestIndex += d;
@@ -1244,9 +1372,11 @@ for (const id of ['stockW', 'stockH', 'stockMargin', 'partSpacing', 'allowRotate
   $(id).addEventListener('change', () => { computeNesting(); redraw(); });
 
 // Annotation settings only change what is engraved, so they skip the rebuild.
-for (const id of ['labelSize', 'labelMax', 'labelDot', 'osm_place',
+for (const id of ['labelSize', 'labelMax', 'labelDot', 'labelClear', 'osm_place',
                   'markerStyle', 'markerSize', 'pointNumSize', 'pointLabelMode'])
   $(id).addEventListener('change', () => { assignFeatures(); redraw(); });
+
+$('thickness').addEventListener('change', () => { if (state.view === 'three') redraw(); });
 
 for (const id of ['sheetW', 'sheetH']) {
   $(id).addEventListener('change', () => {
