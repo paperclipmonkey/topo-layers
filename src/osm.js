@@ -15,6 +15,13 @@ export const FEATURE_GROUPS = {
   rail:     { label: 'Railways',           kind: 'line',    colour: '#8a7ad0' },
   building: { label: 'Buildings',          kind: 'polygon', colour: '#b0603a' },
   green:    { label: 'Woodland',           kind: 'polygon', colour: '#4a9a5a' },
+  // Named points, engraved as lettering rather than traced as outlines.
+  place:    { label: 'Place names',         kind: 'label',   colour: '#8000ff' },
+};
+
+/** How prominent a named place is — controls label size and what gets dropped first. */
+export const PLACE_RANK = {
+  city: 0, town: 1, village: 2, peak: 3, hamlet: 4, suburb: 5, locality: 6,
 };
 
 const SELECTORS = {
@@ -26,6 +33,8 @@ const SELECTORS = {
   building: ['way["building"]', 'relation["building"]'],
   green: ['way["natural"="wood"]', 'way["landuse"="forest"]',
           'relation["natural"="wood"]', 'relation["landuse"="forest"]'],
+  place: ['node["place"~"^(city|town|village|hamlet|suburb|locality)$"]["name"]',
+          'node["natural"="peak"]["name"]'],
 };
 
 function classify(tags = {}) {
@@ -188,11 +197,24 @@ export async function fetchOsmFeatures({ bbox, groups, sheetW, sheetH, simplifyT
 
   const project = makeProjector(bbox, sheetW, sheetH);
   const out = {};
+  const places = [];
   const add = (g, shape) => { (out[g] ||= { kind: FEATURE_GROUPS[g].kind, shapes: [] }).shapes.push(shape); };
 
   const relMembers = new Map();   // group -> segments awaiting stitching
 
   for (const el of json.elements || []) {
+    // Named points come back as nodes and become engraved labels, not outlines.
+    if (el.type === 'node') {
+      const name = el.tags?.name;
+      const kind = el.tags?.place || (el.tags?.natural === 'peak' ? 'peak' : null);
+      if (!groups.place || !name || !kind) continue;
+      const [x, y] = project(el.lon, el.lat);
+      if (x < 0 || y < 0 || x > sheetW || y > sheetH) continue;
+      places.push({ x, y, name, kind, rank: PLACE_RANK[kind] ?? 9,
+                    ele: el.tags.ele ? Math.round(+el.tags.ele) : null });
+      continue;
+    }
+
     const g = classify(el.tags);
     if (!g || !groups[g]) continue;
 
@@ -212,8 +234,10 @@ export async function fetchOsmFeatures({ bbox, groups, sheetW, sheetH, simplifyT
 
   for (const [g, segs] of relMembers) for (const ring of stitch(segs)) emit(g, ring, true);
 
+  places.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
+
   onProgress?.(1, 'Done');
-  return out;
+  return { features: out, places };
 
   function isClosed(el) {
     const gm = el.geometry;

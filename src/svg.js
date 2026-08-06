@@ -11,6 +11,8 @@ export const COLOURS = {
   rail:     '#FF00FF',
   building: '#FF8000',
   green:    '#00E000',
+  place:    '#8000FF',   // engraved place names
+  point:    '#FF0080',   // imported markers and their numbers
 };
 
 const HAIRLINE = 0.1;

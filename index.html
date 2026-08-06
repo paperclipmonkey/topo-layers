@@ -154,7 +154,8 @@
         <div class="chks">
           <label class="chk"><input type="checkbox" id="osm_water" checked> Lakes &amp; reservoirs</label>
           <label class="chk"><input type="checkbox" id="osm_waterway" checked> Rivers &amp; streams</label>
-          <label class="chk"><input type="checkbox" id="osm_road"> Major roads</label>
+          <label class="chk"><input type="checkbox" id="osm_road" checked> Major roads</label>
+          <label class="chk"><input type="checkbox" id="osm_place" checked> Place names</label>
           <label class="chk"><input type="checkbox" id="osm_rail"> Railways</label>
           <label class="chk"><input type="checkbox" id="osm_building"> Buildings</label>
           <label class="chk"><input type="checkbox" id="osm_green"> Woodland</label>
@@ -170,11 +171,53 @@
         </div>
         <button id="fetchOsm" class="btn wide">Fetch OSM features</button>
         <dl class="kv"><dt>Fetched</dt><dd id="osmOut">—</dd></dl>
+
+        <hr class="sep">
+        <label class="lbl">Place-name labels</label>
+        <div class="row">
+          <label>Text size <input type="number" id="labelSize" value="3" min="1" max="20" step="0.5"><span class="u">mm</span></label>
+          <label>Max labels <input type="number" id="labelMax" value="25" min="0" max="300" step="1"></label>
+        </div>
+        <label class="chk"><input type="checkbox" id="labelDot" checked> Mark the spot with a dot</label>
+        <p class="hint">Names are engraved on whichever layer is the visible surface there, in a single-stroke font that cuts as centre lines. Set in capitals — far more readable engraved small.</p>
+      </div>
+    </section>
+
+    <section class="grp" data-open="0" data-step="points">
+      <h2>7 · Your own points <span class="chip"></span></h2>
+      <div class="body">
+        <p class="hint">Load a GeoJSON file. Points are engraved as numbered markers on the layer they sit on, and a CSV key ships with the export so other sheets can refer to them by number.</p>
+        <input type="file" id="geoFile" accept=".geojson,.json,application/geo+json,application/json">
+        <div class="row">
+          <label>Marker
+            <select id="markerStyle">
+              <option value="circle">Circle</option>
+              <option value="target">Crosshair</option>
+              <option value="cross">Cross</option>
+            </select>
+          </label>
+          <label>Size <input type="number" id="markerSize" value="1.8" min="0.2" max="20" step="0.2"><span class="u">mm</span></label>
+        </div>
+        <div class="row">
+          <label>Number size <input type="number" id="pointNumSize" value="3" min="1" max="20" step="0.5"><span class="u">mm</span></label>
+          <label>Labels
+            <select id="pointLabelMode">
+              <option value="number">Number only</option>
+              <option value="both">Number + name</option>
+              <option value="name">Name only</option>
+              <option value="none">Marker only</option>
+            </select>
+          </label>
+        </div>
+        <dl class="kv">
+          <dt>Loaded</dt><dd id="geoOut">—</dd>
+        </dl>
+        <button id="clearGeo" class="btn wide" disabled>Clear points</button>
       </div>
     </section>
 
     <section class="grp" data-open="0">
-      <h2>7 · Assembly aids</h2>
+      <h2>8 · Assembly aids</h2>
       <div class="body">
         <label class="chk"><input type="checkbox" id="baseFull" checked> Bottom layer is the full sheet rectangle</label>
         <label class="chk"><input type="checkbox" id="engraveNext" checked> Engrave outline of the layer above (glue guide)</label>
@@ -193,7 +236,7 @@
     </section>
 
     <section class="grp" data-open="1">
-      <h2>8 · Nesting</h2>
+      <h2>9 · Nesting</h2>
       <div class="body">
         <p class="hint">Packs the layers onto stock boards so the whole piece cuts in one job.</p>
         <div class="row">
@@ -214,7 +257,7 @@
     </section>
 
     <section class="grp" data-open="1">
-      <h2>9 · Export</h2>
+      <h2>10 · Export</h2>
       <div class="body">
         <button id="build" class="btn primary wide">Build layers</button>
         <div class="row">
@@ -227,6 +270,14 @@
         </dl>
       </div>
     </section>
+
+    <div id="nextBar">
+      <div class="nb-text">
+        <strong id="nextTitle">Choose your area</strong>
+        <span id="nextHint">Pan the map and drag the frame over the ground you want.</span>
+      </div>
+      <button id="nextAction" class="btn primary">Frame to view</button>
+    </div>
 
     <footer class="credits">
       Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> ·

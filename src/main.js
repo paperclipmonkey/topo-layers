@@ -2,7 +2,9 @@ import { groundSize, mercatorAspect, fmtDist, fmtScale,
          worldSize, lon2x, lat2y, y2lat } from './geo.js';
 import { fetchElevationGrid, smoothGrid, histogram, DEM_SOURCES } from './terrain.js';
 import { makeThresholds, buildLayers, sheetRect } from './contour.js';
-import { fetchOsmFeatures, FEATURE_GROUPS } from './osm.js';
+import { fetchOsmFeatures, FEATURE_GROUPS, makeProjector } from './osm.js';
+import { textPaths, textWidth } from './font.js';
+import { parseGeoJSON, markerPaths, pointsCSV } from './geojson.js';
 import { sheetSVG, stackedSVG, nestSVG, jigSVG } from './svg.js';
 import { packParts, polygonsBBox } from './nest.js';
 import { renderStack, renderSheet, renderNest, renderHistogram } from './preview.js';
@@ -23,6 +25,10 @@ const state = {
   masks: null,         // per-sheet material coverage, drives feature and pin placement
   pins: [],
   features: null,
+  places: [],          // named OSM points, engraved as labels
+  geoText: null,       // imported GeoJSON, re-projected whenever the frame moves
+  geoPoints: [],
+  geoLines: [],
   overlay: null,
   nesting: null,
   sheetIndex: 0,
@@ -240,6 +246,7 @@ function onAreaChanged() {
     if (isFinite(h) && h > 0) $('sheetH').value = h.toFixed(1);
   }
   updateDerived();
+  updateSteps();
 }
 
 function updateDerived() {
@@ -307,6 +314,7 @@ $('fetchDem').addEventListener('click', async () => {
     generateThresholds();
     await rebuild();
     switchView('stack');
+    updateSteps();
     setStatus('Elevation loaded', 'ok');
   } catch (e) {
     console.error(e);
@@ -608,6 +616,7 @@ async function rebuild() {
     for (const s of sheets) s.pins = null;
   }
 
+  reprojectGeo();
   assignFeatures();
   computeNesting();
 
@@ -617,6 +626,7 @@ async function rebuild() {
     .toLocaleString('en-GB');
   $('dlZip').disabled = $('dlNest').disabled = !sheets.length;
   updateDerived();
+  updateSteps();
   redraw();
 }
 
@@ -641,18 +651,22 @@ $('fetchOsm').addEventListener('click', async () => {
   setStatus('Querying OpenStreetMap…', 'busy');
   setProgress(0.1, 'Overpass can take a while for large areas…');
   try {
-    state.features = await fetchOsmFeatures({
+    const { features, places } = await fetchOsmFeatures({
       bbox: state.bbox, groups,
       sheetW: num('sheetW'), sheetH: num('sheetH'),
       simplifyTol: Math.max(0.05, num('simplifyTol')),
       minLength: 1.2,
       onProgress: setProgress, signal: ctrl.signal,
     });
-    const counts = Object.entries(state.features)
-      .map(([g, d]) => `${FEATURE_GROUPS[g].label.toLowerCase()} ${d.shapes.length}`).join(', ');
-    $('osmOut').textContent = counts || 'nothing found';
+    state.features = features;
+    state.places = places;
+    const counts = Object.entries(features)
+      .map(([g, d]) => `${FEATURE_GROUPS[g].label.toLowerCase()} ${d.shapes.length}`);
+    if (places.length) counts.push(`place names ${places.length}`);
+    $('osmOut').textContent = counts.join(', ') || 'nothing found';
     assignFeatures();
     redraw();
+    updateSteps();
     setStatus('OSM features loaded', 'ok');
   } catch (e) {
     console.error(e);
@@ -662,41 +676,84 @@ $('fetchOsm').addEventListener('click', async () => {
   }
 });
 
+/* ── imported GeoJSON ────────────────────────────────────────────────── */
+
+/** Re-run the projection — the frame or the sheet size may have moved since. */
+function reprojectGeo() {
+  if (!state.geoText || !state.bbox) return;
+  const W = num('sheetW'), H = num('sheetH');
+  try {
+    const { points, lines, skipped } = parseGeoJSON(
+      state.geoText, makeProjector(state.bbox, W, H), W, H);
+    state.geoPoints = points;
+    state.geoLines = lines;
+    const on = points.filter(p => p.onSheet).length;
+    $('geoOut').textContent =
+      `${on}/${points.length} points on sheet` +
+      (lines.length ? `, ${lines.length} lines` : '') +
+      (skipped && !lines.length ? '' : '');
+  } catch (e) {
+    setStatus(e.message, 'err');
+  }
+}
+
+$('geoFile').addEventListener('change', async e => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  if (!state.bbox) { setStatus('Choose an area first', 'err'); return; }
+  try {
+    state.geoText = await file.text();
+    reprojectGeo();
+    $('clearGeo').disabled = false;
+    assignFeatures();
+    redraw();
+    updateSteps();
+    setStatus(`Loaded ${file.name}`, 'ok');
+  } catch (err) {
+    console.error(err);
+    state.geoText = null;
+    setStatus(err.message || 'Could not read that file', 'err');
+  }
+});
+
+$('clearGeo').addEventListener('click', () => {
+  state.geoText = null; state.geoPoints = []; state.geoLines = [];
+  $('geoFile').value = '';
+  $('geoOut').textContent = '—';
+  $('clearGeo').disabled = true;
+  assignFeatures(); redraw(); updateSteps();
+});
+
 /** Distribute fetched features across the sheets according to the placement rule. */
 function assignFeatures() {
   const sheets = state.sheets;
   if (!sheets.length) return;
   for (const s of sheets) { s.features = null; s._fpaths = null; }
   state.overlay = null;
-  if (!state.features || !Object.keys(state.features).length) return;
 
+  const hasShapes = state.features && Object.keys(state.features).length;
+  const hasPlaces = state.places?.length && $('osm_place').checked;
+  const hasImport = state.geoPoints?.length || state.geoLines?.length;
+  if (!hasShapes && !hasPlaces && !hasImport) return;
+
+  const W = num('sheetW'), H = num('sheetH');
   const mode = $('osmPlacement').value;
+  const masks = state.masks || buildMasks(sheets, W, H);
 
-  if (mode === 'top') {
-    sheets[sheets.length - 1].features = state.features;
-    return;
-  }
-  if (mode === 'separate') {
-    state.overlay = {
-      name: 'overlay', file: `${String(sheets.length + 1).padStart(2, '0')}_overlay`,
-      threshold: null, polygons: sheetRect(num('sheetW'), num('sheetH')),
-      features: state.features,
-    };
-    return;
-  }
-
-  // byheight — engrave each feature on the topmost sheet with material there,
-  // which is the surface you would actually see it on in the finished stack.
-  const masks = state.masks || buildMasks(sheets, num('sheetW'), num('sheetH'));
   const bucket = sheets.map(() => ({}));
+  const overlay = {};
   const push = (i, g, kind, shape) => {
-    if (i < 0 || i >= sheets.length) return;
-    (bucket[i][g] ||= { kind, shapes: [] }).shapes.push(shape);
+    const b = mode === 'separate' ? overlay
+            : (i >= 0 && i < sheets.length ? bucket[i] : null);
+    if (!b) return;
+    (b[g] ||= { kind, shapes: [] }).shapes.push(shape);
   };
   const sheetForPoint = (x, y) => {
     for (let i = masks.length - 1; i >= 0; i--) if (inMask(masks[i], x, y)) return i;
     return -1;
   };
+  // 'top' pins everything to the surface layer; 'separate' ignores the index.
+  const resolve = i => mode === 'top' ? sheets.length - 1 : i;
 
   /**
    * Walk a path and cut it wherever it crosses onto a different layer, ending
@@ -727,17 +784,85 @@ function assignFeatures() {
     return pieces;
   };
 
-  for (const [g, data] of Object.entries(state.features)) {
-    for (const shape of data.shapes) {
-      const pieces = splitByLayer(shape);
-      // A lake that sits within one terrace stays a closed shape. One that
-      // straddles a step becomes an arc on each terrace it crosses — which is
-      // what it physically does, since those shorelines are at different heights.
-      if (data.kind === 'polygon' && pieces.length === 1) push(pieces[0][0], g, 'polygon', shape);
-      else for (const [idx, pts] of pieces) push(idx, g, 'line', pts);
+  if (hasShapes) {
+    for (const [g, data] of Object.entries(state.features)) {
+      for (const shape of data.shapes) {
+        if (mode !== 'byheight') { push(sheets.length - 1, g, data.kind, shape); continue; }
+        const pieces = splitByLayer(shape);
+        // A lake that sits within one terrace stays a closed shape. One that
+        // straddles a step becomes an arc on each terrace it crosses — which is
+        // what it physically does, since those shorelines are at different heights.
+        if (data.kind === 'polygon' && pieces.length === 1) push(pieces[0][0], g, 'polygon', shape);
+        else for (const [idx, pts] of pieces) push(idx, g, 'line', pts);
+      }
     }
   }
+
+  /* ---- engraved text and markers -------------------------------------
+     Lettering is never split across a layer boundary — half a word on one
+     terrace and half on the next is unreadable. Each label goes whole onto
+     the layer under its anchor point. */
+  const engrave = (g, i, strokes) => { for (const s of strokes) push(i, g, 'line', s); };
+  const taken = [];
+  const free = box => !taken.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]);
+
+  if (hasPlaces) {
+    const size = num('labelSize');
+    const limit = parseInt($('labelMax').value, 10) || 0;
+    const dot = $('labelDot').checked;
+    let drawn = 0;
+    for (const p of state.places) {
+      if (drawn >= limit) break;
+      const i = resolve(sheetForPoint(p.x, p.y));
+      if (mode !== 'separate' && i < 0) continue;
+
+      const w = textWidth(p.name, size);
+      if (w > W - 2) continue;                       // no room for it at this size
+      const cx = Math.max(w / 2 + 1, Math.min(W - w / 2 - 1, p.x));
+      const by = p.y - size * 0.55;                  // sit the name above its dot
+      const box = [cx - w / 2 - 0.7, by - size - 0.7, cx + w / 2 + 0.7, by + 0.7];
+      if (!free(box)) continue;                      // already something there
+      taken.push(box);
+
+      const strokes = textPaths(p.name, cx, by, size, { anchor: 'middle' });
+      if (dot) strokes.push(...markerPaths(p.x, p.y, Math.max(0.4, size * 0.16), 'circle'));
+      engrave('place', i, strokes);
+      drawn++;
+    }
+  }
+
+  if (state.geoPoints?.length) {
+    const r = num('markerSize'), ns = num('pointNumSize');
+    const style = $('markerStyle').value, labelMode = $('pointLabelMode').value;
+    for (const p of state.geoPoints) {
+      p.sheet = '';
+      if (!p.onSheet) continue;
+      const i = resolve(sheetForPoint(p.x, p.y));
+      if (mode !== 'separate' && i < 0) continue;
+      p.sheet = mode === 'separate' ? 'overlay' : (sheets[i]?.file || '');
+
+      const strokes = markerPaths(p.x, p.y, r, style);
+      const text = labelMode === 'number' ? String(p.n)
+                 : labelMode === 'name' ? p.name
+                 : labelMode === 'both' ? `${p.n} ${p.name}` : '';
+      if (text) strokes.push(...textPaths(text, p.x + r * 1.6, p.y, ns,
+                                          { anchor: 'start', baseline: 'middle' }));
+      engrave('point', i, strokes);
+    }
+  }
+
+  for (const line of state.geoLines || []) {
+    if (mode !== 'byheight') { push(sheets.length - 1, 'point', 'line', line); continue; }
+    for (const [i, pts] of splitByLayer(line)) push(i, 'point', 'line', pts);
+  }
+
   sheets.forEach((s, i) => { s.features = Object.keys(bucket[i]).length ? bucket[i] : null; });
+  if (mode === 'separate' && Object.keys(overlay).length) {
+    state.overlay = {
+      name: 'overlay', file: `${String(sheets.length + 1).padStart(2, '0')}_overlay`,
+      threshold: null, polygons: sheetRect(W, H), features: overlay,
+    };
+  }
 }
 
 /* ── nesting ─────────────────────────────────────────────────────────── */
@@ -919,6 +1044,9 @@ function buildFiles() {
       file: s.file + '.svg', threshold_m: s.threshold, polygons: s.polygons.length,
     })),
   }, null, 2) });
+  if (state.geoPoints?.length)
+    files.push({ name: 'points-key.csv', data: pointsCSV(state.geoPoints, p => p.sheet) });
+
   files.push({ name: 'README.txt', data: readmeText(meta, sheets) });
   return files;
 }
@@ -987,6 +1115,62 @@ $('dlNest').addEventListener('click', () => {
   setStatus(`Nesting downloaded (${files.length} board${files.length > 1 ? 's' : ''})`, 'ok');
 });
 
+/* ── step guidance ───────────────────────────────────────────────────── */
+
+/**
+ * The panel is a long list of options, and only four of its sections are
+ * actually a sequence. This marks those, and keeps one obvious action in front
+ * of you at all times so there is never a question of what to do next.
+ */
+const FLOW = [
+  { section: 0, done: () => !!state.bbox },
+  { section: 2, done: () => !!state.grid },
+  { section: 3, done: () => state.thresholds.length > 0 },
+  { section: 9, done: () => state.sheets.length > 0 },
+];
+
+function nextStep() {
+  if (!state.bbox)
+    return { title: 'Choose your area',
+             hint: 'Pan the map, then drag the frame over the ground you want.',
+             label: 'Frame to view', run: frameToView };
+  if (!state.grid)
+    return { title: 'Fetch the elevation',
+             hint: `Area is set to ${$('groundOut').textContent}. This downloads the terrain for it.`,
+             label: 'Fetch elevation', run: () => $('fetchDem').click() };
+  if (!state.sheets.length)
+    return { title: 'Build the layers',
+             hint: 'Turn the elevation into cut geometry.',
+             label: 'Build layers', run: () => $('build').click() };
+  return { title: `${state.sheets.length} layers ready to cut`,
+           hint: 'Add OSM detail or your own points if you want them — or take the files now.',
+           label: 'Download ZIP', run: () => $('dlZip').click() };
+}
+
+function updateSteps() {
+  const groups = [...document.querySelectorAll('#panel .grp')];
+  let flagged = false;
+  for (const step of FLOW) {
+    const g = groups[step.section];
+    if (!g) continue;
+    let chip = g.querySelector('h2 > .chip');
+    if (!chip) {
+      chip = document.createElement('span');
+      chip.className = 'chip';
+      g.querySelector('h2').appendChild(chip);
+    }
+    if (step.done()) { g.dataset.state = 'done'; chip.textContent = 'done'; }
+    else if (!flagged) { g.dataset.state = 'next'; chip.textContent = 'do this'; flagged = true; }
+    else { g.dataset.state = ''; chip.textContent = ''; }
+  }
+
+  const n = nextStep();
+  $('nextTitle').textContent = n.title;
+  $('nextHint').textContent = n.hint;
+  $('nextAction').textContent = n.label;
+  $('nextAction').onclick = n.run;
+}
+
 /* ── parameter wiring ────────────────────────────────────────────────── */
 
 $('smoothTerrain').addEventListener('input', () => {
@@ -1008,6 +1192,11 @@ $('osmPlacement').addEventListener('change', () => { assignFeatures(); redraw();
 
 for (const id of ['stockW', 'stockH', 'stockMargin', 'partSpacing', 'allowRotate'])
   $(id).addEventListener('change', () => { computeNesting(); redraw(); });
+
+// Annotation settings only change what is engraved, so they skip the rebuild.
+for (const id of ['labelSize', 'labelMax', 'labelDot', 'osm_place',
+                  'markerStyle', 'markerSize', 'pointNumSize', 'pointLabelMode'])
+  $(id).addEventListener('change', () => { assignFeatures(); redraw(); });
 
 for (const id of ['sheetW', 'sheetH']) {
   $(id).addEventListener('change', () => {
@@ -1033,4 +1222,5 @@ window.topo = { state, rebuild, buildFiles, exportMeta, map };
 
 map.whenReady(() => setTimeout(() => { map.invalidateSize(); frameToView(); }, 60));
 renderHistogram($('histo'), null, []);
+updateSteps();
 setStatus('Pick an area, then fetch elevation');
