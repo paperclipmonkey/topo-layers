@@ -248,11 +248,18 @@ too small to take a hole at that margin is skipped rather than weakened.
 
 ## Deploying
 
-The site is served from the `gh-pages` branch. To publish changes:
+Pushing to `main` publishes the site — `.github/workflows/pages.yml` deploys the
+repo to GitHub Pages:
 
 ```bash
-git push origin main && git push origin main:gh-pages
+git push origin main
 ```
+
+Do **not** also push to `gh-pages`. Pages is configured to build from the
+workflow, so a push to that branch starts a second, competing deployment; the
+two fight over the deployment lock and the workflow sits at
+`deployment_in_progress` until it times out. The branch is left in place but is
+no longer the source, and nothing needs to go to it.
 
 Note that the basemap and Overpass are volunteer-run services on a fair-use
 policy — fine for personal use, but don't point heavy traffic at them.
