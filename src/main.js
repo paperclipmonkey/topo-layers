@@ -556,6 +556,12 @@ function choosePins(sheets, masks, opts) {
     const deep = Math.max(rNeed, list[0].c * 0.5);
     const inside = pins.filter(p => (dt[pixIndex(mask, p)] ?? 0) >= rNeed);
 
+    // Two holes must never be allowed to run into each other. Centres stay at
+    // least a diameter plus the margin on both sides apart, and that floor is
+    // checked against *every* hole placed so far, not just the ones that fit
+    // this layer — the layers below carry all of them.
+    const apart = Math.max(opts.dia * 2, opts.dia + 2 * opts.margin);
+
     // A layer is located once it has enough holes AND they are far enough apart
     // to stop it pivoting. Holes inherited from the summit sit close together,
     // so the broad lower sheets ask for another one further out.
@@ -570,9 +576,15 @@ function choosePins(sheets, masks, opts) {
                           (inside.length < 2 || spread() >= diag * 0.3);
 
     while (!located() && pins.length < opts.max && inside.length < opts.perLayer + 2) {
-      const clear = (c, sep) => inside.every(q => Math.hypot(c.x - q[0], c.y - q[1]) >= sep);
+      const clear = (c, sep) =>
+        pins.every(q => Math.hypot(c.x - q[0], c.y - q[1]) >= apart) &&
+        inside.every(q => Math.hypot(c.x - q[0], c.y - q[1]) >= sep);
       let pick = null;
-      for (const [minC, sep] of [[deep, diag * 0.35], [deep, diag * 0.15], [deep, 0], [rNeed, 0]]) {
+      // Spacing degrades towards `apart` and stops there; a layer with no room
+      // left for a properly clear hole simply gets one fewer.
+      for (const [minC, sep] of [[deep, Math.max(diag * 0.35, apart)],
+                                 [deep, Math.max(diag * 0.15, apart)],
+                                 [deep, apart], [rNeed, apart]]) {
         pick = list.find(c => c.c >= minC && clear(c, sep));   // sorted, so this is the deepest
         if (pick) break;
       }
