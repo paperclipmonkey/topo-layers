@@ -9,7 +9,7 @@ import { parseGeoJSON, markerPaths, pointsCSV } from './geojson.js';
 import { sheetSVG, stackedSVG, nestSVG, jigSVG } from './svg.js';
 import { packParts, polygonsBBox } from './nest.js';
 import { renderStack, renderSheet, renderNest, renderHistogram,
-         histoGeom, snapStep } from './preview.js';
+         histoGeom, snapStep, zoomStackAt, clampStack } from './preview.js';
 import { render3D } from './render3d.js';
 import { makeZip, download } from './zip.js';
 import { controlValues, applyControlValues, changedFrom,
@@ -39,6 +39,7 @@ const state = {
   sheetIndex: 0,
   nestIndex: 0,
   view3d: { yaw: -0.62, tilt: 0.72, zoom: 1 },
+  viewStack: { zoom: 1, x: 0, y: 0 },   // pan/zoom of the stacked preview
   view: 'map',
   abort: null,
 };
@@ -1128,25 +1129,47 @@ function assignFeatures() {
    * each piece exactly on the cut edge. Consecutive pieces meet at that point,
    * so a river still reads as continuous down the finished stack and no engrave
    * line runs out over material that is about to be cut away.
+   *
+   * The walk samples along each segment rather than only at its ends. A
+   * simplified road can run straight for centimetres, crossing terrace after
+   * terrace in a single segment; testing only the ends put that whole span on
+   * whichever layer the far end happened to land on, which buried most of it
+   * under the plates above and broke the line into visible gaps. Sampling at
+   * the mask's own pitch cannot miss a crossing the mask can represent.
    */
+  const STEP = 1 / MASK_PPMM;
+
   const splitByLayer = shape => {
     const pieces = [];
     let cur = sheetForPoint(shape[0][0], shape[0][1]);
     let run = [shape[0]];
+    let prev = shape[0];              // the previous sample, for locating the cut
+
     for (let i = 1; i < shape.length; i++) {
-      const p = shape[i];
-      const si = sheetForPoint(p[0], p[1]);
-      if (si === cur) { run.push(p); continue; }
+      const q = shape[i];
+      const dx = q[0] - prev[0], dy = q[1] - prev[1];
+      const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / STEP));
+      const ax = prev[0], ay = prev[1];
 
-      // Layers nest, so climbing to a higher one keeps you on this material;
-      // only a step down actually leaves it and needs trimming.
-      const leaves = cur >= 0 && !inMask(masks[cur], p[0], p[1]);
-      const boundary = leaves ? edgeCross(shape[i - 1], p, masks[cur]) : p;
+      for (let k = 1; k <= steps; k++) {
+        const atEnd = k === steps;
+        const p = atEnd ? q : [ax + (q[0] - ax) * (k / steps), ay + (q[1] - ay) * (k / steps)];
+        const si = sheetForPoint(p[0], p[1]);
 
-      run.push(boundary);
-      if (run.length > 1) pieces.push([cur, run]);
-      run = leaves ? [boundary, p] : [p];
-      cur = si;
+        if (si !== cur) {
+          // Layers nest, so climbing to a higher one keeps you on this material;
+          // only a step down actually leaves it and needs trimming.
+          const leaves = cur >= 0 && !inMask(masks[cur], p[0], p[1]);
+          const boundary = leaves ? edgeCross(prev, p, masks[cur]) : p;
+          run.push(boundary);
+          if (run.length > 1) pieces.push([cur, run]);
+          run = leaves ? [boundary, p] : [p];
+          cur = si;
+        } else if (atEnd) {
+          run.push(q);                // samples in between are not worth keeping
+        }
+        prev = p;
+      }
     }
     if (run.length > 1) pieces.push([cur, run]);
     return pieces;
@@ -1381,7 +1404,10 @@ function redraw() {
 
   if (state.view === 'three') render3D($('threeCanvas'), model, state.view3d);
 
-  if (state.view === 'stack') renderStack($('stackCanvas'), model);
+  if (state.view === 'stack') {
+    renderStack($('stackCanvas'), model, state.viewStack);
+    $('stackZoom').textContent = Math.round(state.viewStack.zoom * 100) + '%';
+  }
 
   if (state.view === 'sheet') {
     state.sheetIndex = Math.max(0, Math.min(state.sheets.length - 1, state.sheetIndex));
@@ -1435,6 +1461,57 @@ $('resetView').addEventListener('click', () => {
   state.view3d = { yaw: -0.62, tilt: 0.72, zoom: 1 };
   redraw();
 });
+
+/* ── stacked preview: pan and zoom ───────────────────────────────────── */
+
+// Worth having for the same reason the 3D view has it: at 1:1 a 300 mm sheet is
+// a few hundred pixels, and whether a name clears its terrace or a river keeps
+// to one plate is a sub-millimetre question.
+const stackCanvas = $('stackCanvas');
+
+function stackModel() {
+  return { sheetW: num('sheetW'), sheetH: num('sheetH'), sheets: state.sheets };
+}
+
+stackCanvas.addEventListener('wheel', e => {
+  if (!state.sheets.length) return;
+  e.preventDefault();
+  const r = stackCanvas.getBoundingClientRect();
+  state.viewStack = zoomStackAt(stackCanvas, stackModel(), state.viewStack,
+                                e.clientX - r.left, e.clientY - r.top,
+                                e.deltaY > 0 ? 1 / 1.14 : 1.14);
+  redraw();
+}, { passive: false });
+
+stackCanvas.addEventListener('pointerdown', e => {
+  if (!state.sheets.length || e.button !== 0) return;
+  stackCanvas.setPointerCapture(e.pointerId);
+  stackCanvas.classList.add('dragging');
+  const from = { x: e.clientX, y: e.clientY, vx: state.viewStack.x, vy: state.viewStack.y };
+  const move = ev => {
+    state.viewStack = clampStack(stackCanvas, stackModel(), {
+      zoom: state.viewStack.zoom,
+      x: from.vx + (ev.clientX - from.x),
+      y: from.vy + (ev.clientY - from.y),
+    });
+    redraw();
+  };
+  const up = () => {
+    stackCanvas.removeEventListener('pointermove', move);
+    stackCanvas.removeEventListener('pointerup', up);
+    stackCanvas.removeEventListener('pointercancel', up);
+    stackCanvas.removeEventListener('lostpointercapture', up);
+    stackCanvas.classList.remove('dragging');
+  };
+  stackCanvas.addEventListener('pointermove', move);
+  stackCanvas.addEventListener('pointerup', up);
+  stackCanvas.addEventListener('pointercancel', up);
+  stackCanvas.addEventListener('lostpointercapture', up);
+});
+
+const resetStack = () => { state.viewStack = { zoom: 1, x: 0, y: 0 }; redraw(); };
+$('resetStack').addEventListener('click', resetStack);
+stackCanvas.addEventListener('dblclick', resetStack);
 
 let spinFrame = null;
 function spinLoop() {
@@ -1810,7 +1887,7 @@ $('fitFrame').addEventListener('click', frameToView);
 
 // Escape hatch for scripting from the console: inspect state, or grab the
 // generated files without going through the download button.
-window.topo = { state, rebuild, buildFiles, exportMeta, map, shareURL };
+window.topo = { state, rebuild, buildFiles, exportMeta, map, shareURL, assignFeatures };
 
 // A link pasted into a tab that already has the app open changes only the
 // fragment, so nothing reloads — rebuild from it by hand. Our own

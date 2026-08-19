@@ -190,6 +190,25 @@ which finds sizeable dolines but not small shakeholes. If you have LIDAR (in the
 UK, Environment Agency 1 m DTM), serve it as `{z}/{x}/{y}` terrarium tiles and
 point the custom source at it — that is where this mode really pays off.
 
+## Checking it before you cut
+
+The **Stacked** tab draws the finished piece from above. Scroll to zoom and drag
+to pan around it, up to 24×: at 1:1 a 300 mm sheet is only a few hundred pixels,
+and whether a name clears its terrace or a river keeps to one plate is a
+sub-millimetre question. Whatever is under the pointer stays under it as you
+zoom, double-click or **Reset view** puts it back, and scrolling all the way out
+returns to the fitted view.
+
+Every engraved line is cut where it crosses onto a different plate and carried
+on down the next one, so a road stays continuous over the finished stack. The
+crossings are found by walking each line at the pitch of the coverage masks
+rather than only testing its ends — a simplified road can run straight for
+centimetres across terrace after terrace in a single segment, and testing only
+the ends put that whole span on whichever plate the far end happened to land on,
+burying most of it under the plates above. On a test with deliberately long
+straight roads that left 79% of the engraved length hidden; walking the segments
+takes it to 1%, the rest being slivers narrower than a mask cell.
+
 ## Checking it in 3D
 
 The **3D** tab builds the stack from the layers and the material thickness and

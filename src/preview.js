@@ -2,9 +2,21 @@
 
 import { COLOURS } from './svg.js';
 
-function fit(canvas, W, H, pad = 28) {
+/** Scale and offset that put a W×H sheet on the canvas, under an optional
+ *  pan/zoom. Kept separate from the drawing so the pointer handling can ask
+ *  where a screen point lands on the sheet without redrawing anything. */
+function fitParams(canvas, W, H, pad, view) {
+  const cw = canvas.clientWidth || 1, ch = canvas.clientHeight || 1;
+  const base = Math.min((cw - pad * 2) / W, (ch - pad * 2) / H);
+  const s = base * (view?.zoom || 1);
+  return { cw, ch, base, s,
+           ox: (cw - W * s) / 2 + (view?.x || 0),
+           oy: (ch - H * s) / 2 + (view?.y || 0) };
+}
+
+function fit(canvas, W, H, pad = 28, view = null) {
   const dpr = window.devicePixelRatio || 1;
-  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  const { cw, ch, s, ox, oy } = fitParams(canvas, W, H, pad, view);
   if (canvas.width !== Math.round(cw * dpr) || canvas.height !== Math.round(ch * dpr)) {
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
@@ -12,10 +24,39 @@ function fit(canvas, W, H, pad = 28) {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  const s = Math.min((cw - pad * 2) / W, (ch - pad * 2) / H);
-  const ox = (cw - W * s) / 2, oy = (ch - H * s) / 2;
   ctx.scale(dpr, dpr);
   return { ctx, s, ox, oy, cw, ch };
+}
+
+const STACK_PAD = 34;
+export const STACK_ZOOM_MAX = 24;
+
+/**
+ * Zoom the stacked preview about a point on the canvas, so whatever is under
+ * the pointer stays under it. Back at 1 the pan goes with it, which makes
+ * scrolling out the way to get your bearings again.
+ */
+export function zoomStackAt(canvas, model, view, px, py, factor) {
+  const { sheetW: W, sheetH: H } = model;
+  const now = fitParams(canvas, W, H, STACK_PAD, view);
+  const zoom = Math.min(STACK_ZOOM_MAX, Math.max(1, view.zoom * factor));
+  if (zoom === 1) return { zoom: 1, x: 0, y: 0 };
+  const mx = (px - now.ox) / now.s, my = (py - now.oy) / now.s;
+  const at = fitParams(canvas, W, H, STACK_PAD, { zoom, x: 0, y: 0 });
+  return clampStack(canvas, model,
+    { zoom, x: px - at.ox - mx * at.s, y: py - at.oy - my * at.s });
+}
+
+/** Keep a corner of the sheet on screen, so it cannot be dragged into nowhere. */
+export function clampStack(canvas, model, view) {
+  const { sheetW: W, sheetH: H } = model;
+  const { cw, ch, s } = fitParams(canvas, W, H, STACK_PAD, view);
+  const keep = 60;
+  const limX = Math.max(0, (W * s - cw) / 2 + cw - keep);
+  const limY = Math.max(0, (H * s - ch) / 2 + ch - keep);
+  return { zoom: view.zoom,
+           x: Math.max(-limX, Math.min(limX, view.x)),
+           y: Math.max(-limY, Math.min(limY, view.y)) };
 }
 
 function pathOf(polygons) {
@@ -58,10 +99,10 @@ function layerFill(i, n) {
   return `hsl(${h}, ${sat}%, ${l}%)`;
 }
 
-export function renderStack(canvas, model) {
+export function renderStack(canvas, model, view = null) {
   const { sheetW: W, sheetH: H, sheets } = model;
   if (!sheets?.length) return;
-  const { ctx, s, ox, oy } = fit(canvas, W, H, 34);
+  const { ctx, s, ox, oy } = fit(canvas, W, H, STACK_PAD, view);
 
   ctx.save();
   ctx.translate(ox, oy);
