@@ -134,7 +134,11 @@ export function renderStack(canvas, model, view = null) {
       ctx.clip(p, 'evenodd');
       for (const [g, fp] of (sheet._fpaths || (sheet._fpaths = featurePaths(sheet.features)))) {
         ctx.strokeStyle = COLOURS[g] || '#888';
-        ctx.lineWidth = (g === 'waterway' || g === 'water' ? 0.55 : 0.4) / s;
+        // A real engraved line is about a fifth of a millimetre wide. Drawing it
+        // at that width rather than a fixed hairline keeps the zoomed-in view
+        // honest: what the laser would close up does not read here as a hole.
+        const wide = g === 'waterway' || g === 'water';
+        ctx.lineWidth = Math.max((wide ? 0.55 : 0.4) / s, wide ? 0.22 : 0.18);
         ctx.globalAlpha = 0.85;
         ctx.stroke(fp);
       }

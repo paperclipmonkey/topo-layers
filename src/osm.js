@@ -125,7 +125,7 @@ function clipSegment(a, b, W, H) {
  * Endpoints are indexed by position, so a multipolygon split into hundreds of
  * member ways stitches in roughly linear time rather than quadratic.
  */
-function stitch(segments) {
+function stitch(segments, minPts = 4) {
   const key = p => `${p[0].toFixed(4)},${p[1].toFixed(4)}`;
   const segs = segments.filter(s => s.length > 1);
   const ends = new Map();
@@ -166,7 +166,7 @@ function stitch(segments) {
       }
       break;
     }
-    if (line.length >= 4) rings.push(line);
+    if (line.length >= minPts) rings.push(line);
   }
   return rings;
 }
@@ -205,6 +205,7 @@ export async function fetchOsmFeatures({ bbox, groups, sheetW, sheetH, simplifyT
   const add = (g, shape) => { (out[g] ||= { kind: FEATURE_GROUPS[g].kind, shapes: [] }).shapes.push(shape); };
 
   const relMembers = new Map();   // group -> segments awaiting stitching
+  const lineWays = new Map();     // group -> the fragments a road arrives in
 
   for (const el of json.elements || []) {
     // Named points come back as nodes and become engraved labels, not outlines.
@@ -227,7 +228,16 @@ export async function fetchOsmFeatures({ bbox, groups, sheetW, sheetH, simplifyT
 
     if (el.type === 'way' && el.geometry) {
       const pts = el.geometry.map(p => project(p.lon, p.lat));
-      emit(g, pts, isClosed(el));
+      // OSM starts a new way at every junction and every change of tag, so one
+      // road arrives as a chain of them — some only tens of metres long. Joining
+      // the chain up before anything is measured or dropped stops a short link
+      // between two stretches of the same road vanishing and leaving a gap.
+      if (FEATURE_GROUPS[g].kind === 'line') {
+        if (!lineWays.has(g)) lineWays.set(g, []);
+        lineWays.get(g).push(pts);
+      } else {
+        emit(g, pts, isClosed(el));
+      }
     } else if (el.type === 'relation' && el.members) {
       const segs = el.members
         .filter(m => m.type === 'way' && m.geometry && m.role !== 'inner')
@@ -240,6 +250,7 @@ export async function fetchOsmFeatures({ bbox, groups, sheetW, sheetH, simplifyT
   }
 
   for (const [g, segs] of relMembers) for (const ring of stitch(segs)) emit(g, ring, true);
+  for (const [g, segs] of lineWays) for (const line of stitch(segs, 2)) emit(g, line, false);
 
   // Biggest first within a rank, so a cap on labels keeps the places that
   // matter rather than whichever ones sort early in the alphabet.

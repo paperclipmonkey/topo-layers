@@ -200,14 +200,33 @@ zoom, double-click or **Reset view** puts it back, and scrolling all the way out
 returns to the fitted view.
 
 Every engraved line is cut where it crosses onto a different plate and carried
-on down the next one, so a road stays continuous over the finished stack. The
-crossings are found by walking each line at the pitch of the coverage masks
-rather than only testing its ends — a simplified road can run straight for
-centimetres across terrace after terrace in a single segment, and testing only
-the ends put that whole span on whichever plate the far end happened to land on,
-burying most of it under the plates above. On a test with deliberately long
-straight roads that left 79% of the engraved length hidden; walking the segments
-takes it to 1%, the rest being slivers narrower than a mask cell.
+on down the next one, so a road stays continuous over the finished stack. Three
+things have to be right for that, and each was measured:
+
+- **Find every crossing.** Each line is walked at the pitch of the coverage
+  masks rather than only tested at its ends — a simplified road runs straight
+  for centimetres across terrace after terrace in a single segment, and testing
+  only the ends put that whole span on whichever plate the far end landed on.
+  On a test with deliberately straight roads that buried 79% of the engraved
+  length under the plates above; walking the segments takes it to 2%.
+- **Cut in the right place.** The masks are a 0.25 mm raster, so a cut located
+  on them sits up to half a cell from where the plate really ends — a visible
+  nick in a road, or a letter stopping short of the step. The cut is now put
+  where the line crosses the plate's actual outline, found on the line itself
+  rather than by pulling it sideways onto the nearest edge, which would shorten
+  the line and kink it. That halves what is left invisible, to 0.054 mm per
+  crossing, and the pieces still reconstruct the original line to the
+  millimetre.
+- **Keep whole roads whole.** OSM starts a new way at every junction and every
+  change of tag, so a road arrives as a chain of fragments, some only tens of
+  metres long. Measuring each fragment against the minimum feature length
+  dropped the short ones — 39 of 119 ways in a test — leaving gaps exactly
+  where two stretches should meet. The chain is now stitched back together
+  before anything is measured or dropped.
+
+Engraved lines are drawn at their real width, about a fifth of a millimetre,
+rather than as a fixed hairline, so zooming in does not turn something the
+laser would close up into an apparent hole.
 
 ## Checking it in 3D
 

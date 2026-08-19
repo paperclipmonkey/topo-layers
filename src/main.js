@@ -424,6 +424,80 @@ function boxInMask(mask, x0, y0, x1, y1, step = 0.4) {
   return true;
 }
 
+/**
+ * The outline edges of a sheet, bucketed on a coarse grid.
+ *
+ * The coverage masks are a 0.25 mm raster, so a cut located on them can sit up
+ * to half a cell from where the plate really ends — enough to leave a visible
+ * nick in a road, or a letter that stops short of the step. Snapping the cut to
+ * the nearest point on the actual outline puts it exactly on the edge that gets
+ * cut, and since both pieces use the snapped point they still meet.
+ */
+const EDGE_CELL = 4;                    // mm; a few hundred cells for a sheet
+
+function buildEdgeIndex(sheet, W, H) {
+  const cols = Math.max(1, Math.ceil(W / EDGE_CELL));
+  const rows = Math.max(1, Math.ceil(H / EDGE_CELL));
+  const cells = new Array(cols * rows);
+  for (const rings of sheet.polygons || []) {
+    for (const r of rings) {
+      for (let i = 1; i < r.length; i++) {
+        const e = [r[i - 1][0], r[i - 1][1], r[i][0], r[i][1]];
+        const cx0 = Math.floor(Math.min(e[0], e[2]) / EDGE_CELL);
+        const cx1 = Math.floor(Math.max(e[0], e[2]) / EDGE_CELL);
+        const cy0 = Math.floor(Math.min(e[1], e[3]) / EDGE_CELL);
+        const cy1 = Math.floor(Math.max(e[1], e[3]) / EDGE_CELL);
+        for (let cy = cy0; cy <= cy1; cy++) {
+          if (cy < 0 || cy >= rows) continue;
+          for (let cx = cx0; cx <= cx1; cx++) {
+            if (cx < 0 || cx >= cols) continue;
+            (cells[cy * cols + cx] ||= []).push(e);
+          }
+        }
+      }
+    }
+  }
+  return { cells, cols, rows };
+}
+
+/**
+ * Where a line crosses that outline, taken on the line itself rather than
+ * pulled sideways onto the nearest edge — a cut moved off the road's own path
+ * would shorten it and kink it at every step. Confined to the span the raster
+ * flagged, so consecutive pieces can neither overlap nor leave a hole; where
+ * geometry and raster disagree by less than a cell there is no crossing to
+ * find, and the caller decides what to do about it.
+ */
+function crossOutline(idx, a, b) {
+  if (!idx) return null;
+  const p0 = a, p1 = b;
+  const rx = p1[0] - p0[0], ry = p1[1] - p0[1];
+  if (Math.abs(rx) < 1e-12 && Math.abs(ry) < 1e-12) return null;
+
+  let best = null, bestD = Infinity;
+  const cx0 = Math.floor(Math.min(p0[0], p1[0]) / EDGE_CELL);
+  const cx1 = Math.floor(Math.max(p0[0], p1[0]) / EDGE_CELL);
+  const cy0 = Math.floor(Math.min(p0[1], p1[1]) / EDGE_CELL);
+  const cy1 = Math.floor(Math.max(p0[1], p1[1]) / EDGE_CELL);
+  for (let j = cy0; j <= cy1; j++) {
+    if (j < 0 || j >= idx.rows) continue;
+    for (let i = cx0; i <= cx1; i++) {
+      if (i < 0 || i >= idx.cols) continue;
+      for (const e of idx.cells[j * idx.cols + i] || []) {
+        const sx = e[2] - e[0], sy = e[3] - e[1];
+        const den = rx * sy - ry * sx;
+        if (Math.abs(den) < 1e-12) continue;
+        const qx = e[0] - p0[0], qy = e[1] - p0[1];
+        const t = (qx * sy - qy * sx) / den;
+        const u = (qx * ry - qy * rx) / den;
+        if (t < 0 || t > 1 || u < 0 || u > 1) continue;
+        if (t < bestD) { bestD = t; best = [p0[0] + rx * t, p0[1] + ry * t]; }
+      }
+    }
+  }
+  return best;
+}
+
 /** Point where segment a→b leaves the mask, to well under the laser's tolerance. */
 function edgeCross(a, b, mask) {
   let lo = 0, hi = 1;
@@ -1139,6 +1213,9 @@ function assignFeatures() {
    */
   const STEP = 1 / MASK_PPMM;
 
+  // Built once per assignment: the cut points are refined against these.
+  const edgeIdx = sheets.map(sh => buildEdgeIndex(sh, W, H));
+
   const splitByLayer = shape => {
     const pieces = [];
     let cur = sheetForPoint(shape[0][0], shape[0][1]);
@@ -1158,12 +1235,21 @@ function assignFeatures() {
 
         if (si !== cur) {
           // Layers nest, so climbing to a higher one keeps you on this material;
-          // only a step down actually leaves it and needs trimming.
+          // only a step down actually leaves it and needs trimming. And the step
+          // between two layers is the outline of the higher one — the edge the
+          // cut belongs on.
           const leaves = cur >= 0 && !inMask(masks[cur], p[0], p[1]);
-          const boundary = leaves ? edgeCross(prev, p, masks[cur]) : p;
+          const hi = Math.max(cur, si);
+          // Where the outline really crosses this step, or — for the odd step
+          // the raster called a cell early or late, where the outline is not in
+          // it at all — the raster's own estimate.
+          const hit = hi >= 0 && hi < sheets.length ? crossOutline(edgeIdx[hi], prev, p) : null;
+          const boundary = hit || (leaves ? edgeCross(prev, p, masks[cur]) : p);
           run.push(boundary);
           if (run.length > 1) pieces.push([cur, run]);
-          run = leaves ? [boundary, p] : [p];
+          // Always resume from the cut, so the two pieces share it exactly and
+          // nothing is dropped between the cut and the sample that found it.
+          run = boundary[0] === p[0] && boundary[1] === p[1] ? [p] : [boundary, p];
           cur = si;
         } else if (atEnd) {
           run.push(q);                // samples in between are not worth keeping
