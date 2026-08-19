@@ -51,7 +51,13 @@ action that comes next. Everything else is optional detail you can ignore.
    cells are square in Mercator.
 3. **Levels** — pick how many layers and where they sit: equal interval, equal
    area (quantile), or snapped to round contour intervals. Or type exact heights,
-   or click the histogram to add and remove them individually.
+   or work directly on the elevation histogram: drag a marker to move a level,
+   click open ground to add one, click a marker to remove it. Levels snap to
+   round numbers unless you hold <kbd>Alt</kbd>, arrow keys nudge whichever one
+   is selected, and the readout under the pointer tells you how much of the map
+   lies below that height. Drag the panel edge, or the bar under the plot, when
+   you want a bigger picking area; a log count scale brings out the thin tail of
+   high ground that a coastal spike would otherwise flatten.
 4. **Contours** — marching squares (`d3-contour`) produces, for each level, the
    closed region of ground above it. Holes are preserved, so a caldera or a lake
    basin cuts out properly.
