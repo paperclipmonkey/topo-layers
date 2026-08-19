@@ -72,7 +72,12 @@ export function packHash(params) {
   return '#' + parts.join('&');
 }
 
-/** Null unless the hash really is one of ours. */
+/**
+ * Null unless the hash really is one of ours: it has to carry a numeric format
+ * marker. A link from a later format is still worth restoring — keys are
+ * control ids, so an unknown one is simply ignored and the rest still applies —
+ * but anything without a version is somebody else's fragment.
+ */
 export function unpackHash(hash) {
   const body = (hash || '').replace(/^#/, '');
   if (!body) return null;
@@ -85,15 +90,23 @@ export function unpackHash(hash) {
       out[decodeURIComponent(pair.slice(0, i))] = decodeURIComponent(pair.slice(i + 1));
     } catch { /* a mangled pair should not sink the whole link */ }
   }
-  return out.v ? out : null;
+  const version = parseFloat(out.v);
+  return Number.isFinite(version) && version >= 1 ? out : null;
 }
 
-/** Four finite numbers, south/west/north/east, or null. */
+// The Mercator cut-off. Past it there is no map to sample, and the tile maths
+// runs off the edge of the world rather than failing outright.
+const LAT_LIMIT = 85.05112878;
+
+/** Four numbers, south/west/north/east, that describe somewhere real — or null. */
 export function parseBBox(text) {
   const n = String(text || '').split(',').map(Number);
   if (n.length !== 4 || !n.every(Number.isFinite)) return null;
-  if (n[2] <= n[0] || n[3] <= n[1]) return null;
-  return { south: n[0], west: n[1], north: n[2], east: n[3] };
+  const [south, west, north, east] = n;
+  if (north <= south || east <= west) return null;
+  if (south < -LAT_LIMIT || north > LAT_LIMIT) return null;
+  if (west < -180 || east > 180) return null;
+  return { south, west, north, east };
 }
 
 // Six decimals is about 0.1 m of ground — finer than the frame's own pixel

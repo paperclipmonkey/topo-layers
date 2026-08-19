@@ -1716,8 +1716,9 @@ function shareParams() {
   return p;
 }
 
-const shareURL = () =>
-  location.origin + location.pathname + location.search + packHash(shareParams());
+// Built off the current href rather than origin + pathname, which comes out as
+// "null/…" wherever the origin is opaque.
+const shareURL = () => location.href.split('#')[0] + packHash(shareParams());
 
 let urlTimer = 0;
 function syncURL() {
