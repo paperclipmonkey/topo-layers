@@ -194,10 +194,27 @@
           <label>Text size <input type="number" id="labelSize" value="3" min="1" max="20" step="0.5"><span class="u">mm</span></label>
           <label>Max labels <input type="number" id="labelMax" value="25" min="0" max="300" step="1"></label>
         </div>
+        <div class="row">
+          <label>Smallest settlement
+            <select id="placeMin">
+              <option value="city">Cities only</option>
+              <option value="town">Towns and up</option>
+              <option value="village" selected>Villages and up</option>
+              <option value="hamlet">Hamlets and up</option>
+              <option value="any">Anything named</option>
+            </select>
+          </label>
+          <label>Names that straddle a step
+            <select id="labelFit">
+              <option value="split" selected>Split across the plates</option>
+              <option value="whole">Leave them off</option>
+              <option value="any">Engrave over the join</option>
+            </select>
+          </label>
+        </div>
         <label class="chk"><input type="checkbox" id="labelDot" checked> Mark the spot with a dot</label>
-        <label class="chk"><input type="checkbox" id="labelClear" checked> Keep names readable from above</label>
         <dl class="kv"><dt>Names engraved</dt><dd id="labelOut">—</dd></dl>
-        <p class="hint">Names are engraved on whichever layer is the visible surface there, in a single-stroke font that cuts as centre lines. Set in capitals — far more readable engraved small.</p>
+        <p class="hint">Names are engraved on whichever layer is the visible surface there, in a single-stroke font that cuts as centre lines. Set in capitals — far more readable engraved small. A name is first moved and shrunk to try to find clear ground; only if that fails does the straddle rule apply. Split lettering is cut at the plate edge and continues on the next plate down, so the name still reads across the step. Peaks are never filtered by settlement size.</p>
       </div>
     </section>
 

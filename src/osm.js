@@ -19,10 +19,14 @@ export const FEATURE_GROUPS = {
   place:    { label: 'Place names',         kind: 'label',   colour: '#8000ff' },
 };
 
-/** How prominent a named place is — controls label size and what gets dropped first. */
+/** How prominent a named place is — controls what gets dropped first. */
 export const PLACE_RANK = {
   city: 0, town: 1, village: 2, peak: 3, hamlet: 4, suburb: 5, locality: 6,
 };
+
+/** Settlement sizes a map can be limited to, largest first. A peak is not a
+ *  settlement, so it is never filtered out by size. */
+export const PLACE_FLOOR = { city: 0, town: 1, village: 2, hamlet: 4, any: 99 };
 
 const SELECTORS = {
   water: ['way["natural"="water"]', 'relation["natural"="water"]',
@@ -210,7 +214,10 @@ export async function fetchOsmFeatures({ bbox, groups, sheetW, sheetH, simplifyT
       if (!groups.place || !name || !kind) continue;
       const [x, y] = project(el.lon, el.lat);
       if (x < 0 || y < 0 || x > sheetW || y > sheetH) continue;
+      // OSM writes population as a plain integer, sometimes with separators.
+      const pop = parseInt(String(el.tags.population || '').replace(/[^0-9]/g, ''), 10);
       places.push({ x, y, name, kind, rank: PLACE_RANK[kind] ?? 9,
+                    population: Number.isFinite(pop) ? pop : null,
                     ele: el.tags.ele ? Math.round(+el.tags.ele) : null });
       continue;
     }
@@ -234,7 +241,11 @@ export async function fetchOsmFeatures({ bbox, groups, sheetW, sheetH, simplifyT
 
   for (const [g, segs] of relMembers) for (const ring of stitch(segs)) emit(g, ring, true);
 
-  places.sort((a, b) => a.rank - b.rank || a.name.localeCompare(b.name));
+  // Biggest first within a rank, so a cap on labels keeps the places that
+  // matter rather than whichever ones sort early in the alphabet.
+  places.sort((a, b) => a.rank - b.rank ||
+                        (b.population || 0) - (a.population || 0) ||
+                        a.name.localeCompare(b.name));
 
   onProgress?.(1, 'Done');
   return { features: out, places };

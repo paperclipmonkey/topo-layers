@@ -108,21 +108,36 @@ app: the laser traces each letter's centre line once rather than clearing a
 filled interior, which is far quicker to burn, stays legible down to about 2 mm,
 and needs no font file, so the marks are identical on any machine. Labels are
 set in capitals — the cartographic convention, and markedly clearer engraved
-small. A label is never split across a layer boundary, and where two collide the
-less prominent one is dropped.
+small. Where two labels collide the less prominent one is dropped.
 
-**Keep names readable from above** is worth understanding, because it trades
-coverage for legibility. A name engraved on a layer is only visible where that
-layer is not covered by the plate above it, and with a dozen layers those
-exposed terraces are narrow bands — so a name at its natural position very often
-runs half onto thin air or disappears under the next plate. With the option on,
-each name is tried at a range of offsets around its point and at up to two
-smaller sizes, looking for somewhere it sits complete on a single visible
-terrace; anything that still has nowhere to go is dropped rather than engraved
-broken, and the panel tells you how many. The dot stays at the true location on
-whatever layer is exposed *there*, which is not necessarily the layer the name
-moved to. On a 12-layer test this took the proportion of lettering falling off
-its terrace from 33% to under 1%, at the cost of 2 names in 12.
+**Placing a name** is the fiddly part, because a name engraved on a layer is
+only visible where that layer is not covered by the plate above it, and with a
+dozen layers those exposed terraces are narrow bands — so a name at its natural
+position very often runs off its terrace. Each name is therefore tried at a
+range of offsets around its point and at up to two smaller sizes, looking for
+somewhere it sits complete on a single visible terrace. On a 12-layer test that
+search alone took the proportion of lettering falling off its terrace from 33%
+to under 1%.
+
+**Names that straddle a step** decides what happens to the rest — the ones no
+offset or size can fit on one terrace:
+
+- *Split across the plates* (the default) cuts the lettering where it crosses a
+  plate edge and carries it on down the next plate, exactly as a river is cut.
+  Nothing is lost: the pieces are the same strokes, divided. In a 13-layer test
+  this engraved all 15 names where leaving them off engraved 6.
+- *Leave them off* keeps every name whole on one plate, and drops the rest.
+- *Engrave over the join* ignores the terraces and takes the first free spot.
+
+The dot stays at the true location on whatever layer is exposed *there*, which
+is not necessarily the layer the name moved to.
+
+**Smallest settlement** decides what is worth a name at all: cities only, towns
+and up, villages and up, hamlets and up, or anything named. Peaks are landmarks
+rather than settlements, so they are never filtered out by size. Within a size,
+names are ordered by population where OSM records one, so a cap on **Max
+labels** keeps the places that matter rather than whichever ones sort early in
+the alphabet.
 
 Turn it off to engrave every name at its exact position and accept the
 clipping.

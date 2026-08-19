@@ -3,7 +3,7 @@ import { groundSize, mercatorAspect, fmtDist, fmtScale,
 import { fetchElevationGrid, smoothGrid, histogram, DEM_SOURCES } from './terrain.js';
 import { makeThresholds, buildLayers, sheetRect } from './contour.js';
 import { findDepressions, optimiseLevels, countRendered } from './depression.js';
-import { fetchOsmFeatures, FEATURE_GROUPS, makeProjector } from './osm.js';
+import { fetchOsmFeatures, FEATURE_GROUPS, PLACE_FLOOR, makeProjector } from './osm.js';
 import { textPaths, textWidth } from './font.js';
 import { parseGeoJSON, markerPaths, pointsCSV } from './geojson.js';
 import { sheetSVG, stackedSVG, nestSVG, jigSVG } from './svg.js';
@@ -1167,9 +1167,10 @@ function assignFeatures() {
   }
 
   /* ---- engraved text and markers -------------------------------------
-     Lettering is never split across a layer boundary — half a word on one
-     terrace and half on the next is unreadable. Each label goes whole onto
-     the layer under its anchor point. */
+     A name is placed whole wherever one can be found a clear patch of visible
+     terrace, moving and shrinking it to try. Only when that fails does the
+     straddle rule decide: cut the lettering at the plate edge and carry it on
+     down the next plate, leave the name off, or engrave it across the join. */
   const engrave = (g, i, strokes) => { for (const s of strokes) push(i, g, 'line', s); };
   const taken = [];
   const free = box => !taken.some(b => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]);
@@ -1178,12 +1179,16 @@ function assignFeatures() {
     const size = num('labelSize');
     const limit = parseInt($('labelMax').value, 10) || 0;
     const dot = $('labelDot').checked;
-    const keepClear = $('labelClear').checked && mode === 'byheight';
+    const fit = $('labelFit').value;                       // split | whole | any
+    const keepClear = fit !== 'any' && mode === 'byheight';
     const exposed = keepClear ? buildExposed(masks) : null;
-    let drawn = 0, skipped = 0;
+    // A peak is a landmark, not a settlement, so size never rules one out.
+    const floor = PLACE_FLOOR[$('placeMin').value] ?? PLACE_FLOOR.any;
+    let drawn = 0, skipped = 0, split = 0;
 
     for (const p of state.places) {
       if (drawn >= limit) break;
+      if (p.kind !== 'peak' && p.rank > floor) continue;
       const anchor = sheetForPoint(p.x, p.y);
       if (mode !== 'separate' && anchor < 0) continue;
 
@@ -1208,10 +1213,10 @@ function assignFeatures() {
             // the box has to allow for descenders, or a Q or comma pokes out
             const box = [cx - half - 0.6, by - sz - 0.6, cx + half + 0.6, by + sz * 0.2 + 0.6];
             if (!free(box)) continue;
-            if (!exposed) { placed = { cx, by, sz, box, layer: resolve(anchor) }; break outer; }
+            if (!exposed) { placed = { cx, by, sz, box, layer: resolve(anchor), clear: true }; break outer; }
             for (let i = anchor; i >= 0; i--) {
               if (boxInMask(exposed[i], box[0], box[1], box[2], box[3])) {
-                placed = { cx, by, sz, box, layer: i };
+                placed = { cx, by, sz, box, layer: i, clear: true };
                 break outer;
               }
             }
@@ -1219,21 +1224,32 @@ function assignFeatures() {
         }
       }
 
-      // Nothing fits cleanly. With "readable from above" on, a name is dropped
-      // rather than engraved half onto thin air or under the plate above.
+      // Nothing sits clear of a step. Leave the name off, or take it at its
+      // natural spot and let the plates cut it up.
       if (!placed) {
-        if (keepClear) { skipped++; continue; }
+        if (fit === 'whole') { skipped++; continue; }
         const half = w / 2;
         const cx = Math.max(half + 1, Math.min(W - half - 1, p.x));
         const by = p.y - size * 0.55;
         const box = [cx - half - 0.6, by - size - 0.6, cx + half + 0.6, by + size * 0.2 + 0.6];
         if (!free(box)) continue;
-        placed = { cx, by, sz: size, box, layer: resolve(anchor) };
+        placed = { cx, by, sz: size, box, layer: resolve(anchor), clear: false };
       }
 
       taken.push(placed.box);
       const target = mode === 'top' ? sheets.length - 1 : placed.layer;
-      engrave('place', target, textPaths(p.name, placed.cx, placed.by, placed.sz, { anchor: 'middle' }));
+      const strokes = textPaths(p.name, placed.cx, placed.by, placed.sz, { anchor: 'middle' });
+
+      // Straddling a step, each stroke is cut where it crosses and carries on
+      // over the next plate down — the same treatment a river gets, and for the
+      // same reason: that is where the material actually is.
+      if (!placed.clear && fit === 'split' && mode === 'byheight') {
+        for (const stroke of strokes)
+          for (const [idx, pts] of splitByLayer(stroke)) push(idx, 'place', 'line', pts);
+        split++;
+      } else {
+        engrave('place', target, strokes);
+      }
 
       // The dot marks the actual spot, so it belongs on whatever layer is
       // exposed *there* — which is not necessarily the one the name moved to.
@@ -1243,10 +1259,11 @@ function assignFeatures() {
       }
       drawn++;
     }
-    state.labelStats = { drawn, skipped };
-    $('labelOut').textContent = skipped
-      ? `${drawn} · ${skipped} had nowhere clear`
-      : String(drawn);
+    state.labelStats = { drawn, skipped, split };
+    const notes = [];
+    if (split) notes.push(`${split} split`);
+    if (skipped) notes.push(`${skipped} had nowhere clear`);
+    $('labelOut').textContent = notes.length ? `${drawn} · ${notes.join(', ')}` : String(drawn);
   }
 
   if (state.geoPoints?.length) {
@@ -1663,7 +1680,7 @@ for (const id of ['stockW', 'stockH', 'stockMargin', 'partSpacing', 'allowRotate
   $(id).addEventListener('change', () => { computeNesting(); redraw(); });
 
 // Annotation settings only change what is engraved, so they skip the rebuild.
-for (const id of ['labelSize', 'labelMax', 'labelDot', 'labelClear', 'osm_place',
+for (const id of ['labelSize', 'labelMax', 'labelDot', 'labelFit', 'placeMin', 'osm_place',
                   'markerStyle', 'markerSize', 'pointNumSize', 'pointLabelMode'])
   $(id).addEventListener('change', () => { assignFeatures(); redraw(); });
 
