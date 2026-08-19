@@ -12,6 +12,8 @@ import { renderStack, renderSheet, renderNest, renderHistogram,
          histoGeom, snapStep } from './preview.js';
 import { render3D } from './render3d.js';
 import { makeZip, download } from './zip.js';
+import { controlValues, applyControlValues, changedFrom,
+         packHash, unpackHash, parseBBox, formatBBox, parseLevels } from './share.js';
 
 const $ = id => document.getElementById(id);
 const num = id => parseFloat($(id).value);
@@ -251,6 +253,7 @@ function onAreaChanged() {
   }
   updateDerived();
   updateSteps();
+  syncURL();
 }
 
 function updateDerived() {
@@ -289,8 +292,15 @@ $('demSource').addEventListener('change', () => {
   $('demCustomRow').hidden = v !== 'custom';
 });
 
-$('fetchDem').addEventListener('click', async () => {
-  if (!state.bbox) return;
+/**
+ * Fetch the terrain under the frame and rebuild from it.
+ *
+ * `levels` comes from a shared link: those heights were chosen deliberately, so
+ * they are used as-is instead of generating a fresh set. `view` is where to
+ * land once the layers exist.
+ */
+async function fetchElevation({ levels = null, view = 'stack' } = {}) {
+  if (!state.bbox) return false;
   state.abort?.abort();
   const ctrl = new AbortController();
   state.abort = ctrl;
@@ -315,18 +325,23 @@ $('fetchDem').addEventListener('click', async () => {
     $('elevOut').textContent = `${Math.round(grid.min)} – ${Math.round(grid.max)} m`;
     $('tilesOut').textContent = `${grid.tiles} @ z${grid.zoom}` + (grid.missing ? ` (${grid.missing} missing)` : '');
 
-    generateThresholds();
+    if (levels?.length) { state.thresholds = levels; writeThresholds(); }
+    else generateThresholds();
     await rebuild();
-    switchView('stack');
+    switchView(view);
     updateSteps();
     setStatus('Elevation loaded', 'ok');
+    return true;
   } catch (e) {
     console.error(e);
     setStatus(e.message || 'Elevation fetch failed', 'err');
+    return false;
   } finally {
     hideProgress();
   }
-});
+}
+
+$('fetchDem').addEventListener('click', () => fetchElevation());
 
 function applyTerrainSmoothing() {
   if (!state.grid) return;
@@ -480,6 +495,7 @@ function writeThresholds() {
   renderHist();
   updateDerived();
   updateDolineReadout();
+  syncURL();
 }
 
 function readThresholds() {
@@ -490,6 +506,7 @@ function readThresholds() {
   renderHist();
   updateDerived();
   updateDolineReadout();
+  syncURL();
 }
 
 $('genThresholds').addEventListener('click', () => { generateThresholds(); scheduleRebuild(); });
@@ -986,10 +1003,10 @@ function scheduleRebuild() {
 
 const OSM_IDS = Object.keys(FEATURE_GROUPS).map(g => ['osm_' + g, g]);
 
-$('fetchOsm').addEventListener('click', async () => {
-  if (!state.bbox) return;
+async function fetchOsm() {
+  if (!state.bbox) return false;
   const groups = Object.fromEntries(OSM_IDS.map(([id, g]) => [g, $(id).checked]));
-  if (!Object.values(groups).some(Boolean)) { setStatus('Pick at least one feature type', 'err'); return; }
+  if (!Object.values(groups).some(Boolean)) { setStatus('Pick at least one feature type', 'err'); return false; }
 
   state.abort?.abort();
   const ctrl = new AbortController();
@@ -1013,14 +1030,19 @@ $('fetchOsm').addEventListener('click', async () => {
     assignFeatures();
     redraw();
     updateSteps();
+    syncURL();
     setStatus('OSM features loaded', 'ok');
+    return true;
   } catch (e) {
     console.error(e);
     setStatus(e.message || 'Overpass failed', 'err');
+    return false;
   } finally {
     hideProgress();
   }
-});
+}
+
+$('fetchOsm').addEventListener('click', () => fetchOsm());
 
 /* ── imported GeoJSON ────────────────────────────────────────────────── */
 
@@ -1666,15 +1688,127 @@ $('emphasis').addEventListener('input', () => {
 for (const id of ['thrFloor', 'thrCeil'])
   $(id).addEventListener('change', () => { generateThresholds(); scheduleRebuild(); });
 
+/* ── shareable links ─────────────────────────────────────────────────── */
+
+/**
+ * The address bar always holds a link back to the piece on screen: the frame,
+ * the settings and the exact levels. Opening one rebuilds it and lands on the
+ * turntable, because a link you send someone is a link to look at.
+ *
+ * Captured before any link is applied, so "differs from stock" means the stock
+ * the markup ships with.
+ */
+const CONTROL_DEFAULTS = controlValues();
+
+function shareParams() {
+  const p = changedFrom(CONTROL_DEFAULTS, controlValues());
+  // Always carried, even at stock values: with the frame driving the sheet, an
+  // omitted height would be re-derived on open and quietly reshape the piece.
+  p.sheetW = $('sheetW').value;
+  p.sheetH = $('sheetH').value;
+  if (state.bbox) p.bbox = formatBBox(state.bbox);
+  // Three decimals: finer than any DEM can justify, so the levels a link
+  // rebuilds are the ones that were cut, not a rounded neighbour.
+  if (state.thresholds.length) p.levels = state.thresholds.map(t => +t.toFixed(3)).join(',');
+  const bm = document.querySelector('input[name=bm]:checked')?.value;
+  if (bm && bm !== 'osm') p.basemap = bm;
+  if (state.features) p.osm = '1';       // the link re-queries Overpass for them
+  return p;
+}
+
+// Built off the current href rather than origin + pathname, which comes out as
+// "null/…" wherever the origin is opaque.
+const shareURL = () => location.href.split('#')[0] + packHash(shareParams());
+
+let urlTimer = 0;
+function syncURL() {
+  clearTimeout(urlTimer);
+  urlTimer = setTimeout(() => {
+    try { history.replaceState(null, '', shareURL()); } catch { /* file:// etc */ }
+  }, 400);
+}
+
+// One pair of listeners covers every control in the panel, including any added
+// later — nothing to keep in step by hand.
+$('panel').addEventListener('change', syncURL);
+$('panel').addEventListener('input', syncURL);
+document.querySelectorAll('input[name=bm]').forEach(r => r.addEventListener('change', syncURL));
+
+$('copyLink').addEventListener('click', async () => {
+  const url = shareURL();
+  try { history.replaceState(null, '', url); } catch { /* ignore */ }
+  try {
+    await navigator.clipboard.writeText(url);
+    setStatus('Share link copied', 'ok');
+  } catch {
+    setStatus('Link is in the address bar — copy it from there', 'ok');
+  }
+});
+
+/** Readouts and conditional rows that normally move with their control. */
+function syncControlEcho() {
+  $('smoothTerrainOut').textContent = $('smoothTerrain').value;
+  $('smoothCurveOut').textContent = $('smoothCurve').value;
+  $('emphasisOut').textContent = $('emphasis').value + '%';
+  const src = $('demSource').value;
+  $('demTokenRow').hidden = src !== 'mapbox';
+  $('demCustomRow').hidden = src !== 'custom';
+}
+
+/**
+ * Rebuild the piece a link describes. The terrain has to come down the wire
+ * before there is anything to show, so this is a fetch, not just a form fill.
+ */
+async function restoreShared(p) {
+  applyControlValues(p);
+  syncControlEcho();
+
+  if (p.basemap && BASEMAPS[p.basemap]) {
+    const radio = document.querySelector(`input[name=bm][value="${p.basemap}"]`);
+    if (radio) { radio.checked = true; map.removeLayer(basemap); basemap = BASEMAPS[p.basemap].addTo(map); }
+  }
+
+  const bb = parseBBox(p.bbox);
+  if (!bb) { frameToView(); setStatus('That link has no map area in it', 'err'); return; }
+  state.bbox = bb;
+  map.fitBounds([[bb.south, bb.west], [bb.north, bb.east]], { padding: [40, 40], animate: false });
+  drawFrame();
+  onAreaChanged();
+  applyControlValues(p);      // the link is the authority: it outranks anything just derived
+  updateDerived();
+
+  // Spin is set first: switching to the 3D view is what starts the loop.
+  $('spin').checked = true;
+  const ok = await fetchElevation({ levels: parseLevels(p.levels), view: 'three' });
+  if (!ok) return;
+
+  // Engraved detail is a second, slower round trip — let it land on a model
+  // that is already turning rather than hold the whole link up for it.
+  if (p.osm === '1') fetchOsm();
+}
+
 /* ── go ──────────────────────────────────────────────────────────────── */
 
 $('fitFrame').addEventListener('click', frameToView);
 
 // Escape hatch for scripting from the console: inspect state, or grab the
 // generated files without going through the download button.
-window.topo = { state, rebuild, buildFiles, exportMeta, map };
+window.topo = { state, rebuild, buildFiles, exportMeta, map, shareURL };
 
-map.whenReady(() => setTimeout(() => { map.invalidateSize(); frameToView(); }, 60));
+// A link pasted into a tab that already has the app open changes only the
+// fragment, so nothing reloads — rebuild from it by hand. Our own
+// history.replaceState never fires this, so it can only be someone arriving.
+window.addEventListener('hashchange', () => {
+  const p = unpackHash(location.hash);
+  if (p) restoreShared(p).catch(e => setStatus(e.message, 'err'));
+});
+
+const shared = unpackHash(location.hash);
+map.whenReady(() => setTimeout(() => {
+  map.invalidateSize();
+  if (shared) restoreShared(shared).catch(e => setStatus(e.message, 'err'));
+  else frameToView();
+}, 60));
 renderHist();
 updateSteps();
-setStatus('Pick an area, then fetch elevation');
+setStatus(shared ? 'Opening a shared link…' : 'Pick an area, then fetch elevation');

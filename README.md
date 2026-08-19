@@ -66,6 +66,16 @@ action that comes next. Everything else is optional detail you can ignore.
    small to survive the cut, and optional kerf compensation.
 6. **Export** — one SVG per layer plus assembly aids, in a ZIP.
 
+The address bar always holds a link back to the piece on screen — frame, every
+setting, and the exact levels. **Copy share link** puts it on the clipboard;
+opening one fetches the terrain again, rebuilds the stack and lands on the 3D
+turntable with it turning, so a link you send is a link to look at. Paste one
+into a tab that already has the app open and it rebuilds there too. Engraved
+OSM detail is re-queried only if the link was made with features fetched, and
+it arrives after the model is already up rather than holding it back. What a
+link never carries: your elevation API token, and any GeoJSON you loaded —
+both stay on your machine.
+
 ## Output
 
 | File | What it is |
