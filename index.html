@@ -106,8 +106,17 @@
     <section class="grp" data-open="1">
       <h2>4 · Layer heights</h2>
       <div class="body">
-        <canvas id="histo" height="110"></canvas>
-        <p class="hint">Elevation histogram. Click to add a level, click a marker to remove it.</p>
+        <div id="histoWrap">
+          <canvas id="histo" height="110" tabindex="0"
+                  aria-label="Elevation histogram. Drag the markers to move layer heights, click to add or remove one."></canvas>
+          <div id="histoGrip" title="Drag to make the histogram taller · double-click to reset"></div>
+        </div>
+        <div class="row histo-tools">
+          <label class="chk"><input type="checkbox" id="histoLog"> Log counts</label>
+          <div class="spacer"></div>
+          <button id="histoClear" class="btn sm">Clear levels</button>
+        </div>
+        <p class="hint">Drag a marker to move a level, click open ground to add one, click a marker to remove it. <kbd>Alt</kbd> drags off the round-number snap; arrow keys nudge the selected level and <kbd>Delete</kbd> drops it. The bar below the plot and the panel edge both drag, for a bigger picking area.</p>
         <div class="row">
           <label>Levels <input type="number" id="nLevels" value="8" min="2" max="40" step="1"></label>
           <label>Mode
@@ -293,6 +302,8 @@
       Features &amp; basemap: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors
     </footer>
   </aside>
+
+  <div id="panelGrip" title="Drag to resize the panel · double-click to reset"></div>
 
   <!-- ───────────────────────── preview area ───────────────────────── -->
   <section id="stage">

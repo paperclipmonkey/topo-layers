@@ -8,7 +8,8 @@ import { textPaths, textWidth } from './font.js';
 import { parseGeoJSON, markerPaths, pointsCSV } from './geojson.js';
 import { sheetSVG, stackedSVG, nestSVG, jigSVG } from './svg.js';
 import { packParts, polygonsBBox } from './nest.js';
-import { renderStack, renderSheet, renderNest, renderHistogram } from './preview.js';
+import { renderStack, renderSheet, renderNest, renderHistogram,
+         histoGeom, snapStep } from './preview.js';
 import { render3D } from './render3d.js';
 import { makeZip, download } from './zip.js';
 
@@ -463,9 +464,20 @@ function updateDolineReadout() {
   $('dolineOut').textContent = `${shown}/${total} shown · ${rings} rings`;
 }
 
+/**
+ * Keep the Levels box showing what is actually on the histogram, so hitting
+ * Generate after hand-picking does not throw the count back to where it was.
+ */
+function syncLevelCount() {
+  const n = state.thresholds.length;
+  const box = $('nLevels');
+  if (n >= +box.min && n <= +box.max) box.value = n;
+}
+
 function writeThresholds() {
   $('thrList').value = state.thresholds.map(t => t.toFixed(1)).join('\n');
-  renderHistogram($('histo'), state.hist, state.thresholds);
+  syncLevelCount();
+  renderHist();
   updateDerived();
   updateDolineReadout();
 }
@@ -474,7 +486,8 @@ function readThresholds() {
   state.thresholds = $('thrList').value
     .split(/[\n,;]+/).map(s => parseFloat(s.trim()))
     .filter(Number.isFinite).sort((a, b) => a - b);
-  renderHistogram($('histo'), state.hist, state.thresholds);
+  syncLevelCount();
+  renderHist();
   updateDerived();
   updateDolineReadout();
 }
@@ -482,20 +495,276 @@ function readThresholds() {
 $('genThresholds').addEventListener('click', () => { generateThresholds(); scheduleRebuild(); });
 $('thrList').addEventListener('change', () => { readThresholds(); scheduleRebuild(); });
 
-$('histo').addEventListener('click', e => {
+/* ── histogram interaction ───────────────────────────────────────────── */
+
+/**
+ * The histogram is the fastest way to pick levels, so it behaves like a proper
+ * control: markers drag, open ground adds, a marker click removes, and the
+ * selected level takes arrow keys. Only the release rebuilds the stack — the
+ * contouring is far too heavy to run on every pointer move.
+ */
+const histoEl = $('histo');
+const histo = { hover: null, active: -1, drag: null, frame: 0 };
+
+function renderHist() {
+  if (histo.active >= state.thresholds.length) histo.active = -1;
+  renderHistogram(histoEl, state.hist, state.thresholds, {
+    hover: histo.hover, active: histo.active, logScale: $('histoLog').checked,
+  });
+}
+
+/** Coalesce repaints during a drag — one per animation frame is plenty. */
+function paintHist() {
+  if (histo.frame) return;
+  histo.frame = requestAnimationFrame(() => { histo.frame = 0; renderHist(); });
+}
+
+const HIT_PX = 8;
+
+function histoAt(e) {
+  const rect = histoEl.getBoundingClientRect();
+  const g = histoGeom(histoEl, state.hist);
+  const x = (e.clientX - rect.left) * (g.cw / (rect.width || 1));
+  return { g, x, value: g.toValue(x) };
+}
+
+/** Index of the level under the pointer, or -1. */
+function levelNear(g, x) {
+  let best = -1, bestD = HIT_PX;
+  state.thresholds.forEach((t, i) => {
+    const d = Math.abs(g.toX(t) - x);
+    if (d <= bestD) { bestD = d; best = i; }
+  });
+  return best;
+}
+
+/** Snap to round numbers by default; Alt gives continuous control. */
+function snapLevel(v, g, fine) {
+  const step = snapStep(g.span);
+  const snapped = fine ? v : Math.round(v / step) * step;
+  return +snapped.toFixed(4);
+}
+
+/** Keep a dragged level inside the range and on its own side of its neighbours. */
+function clampLevel(v, i, g) {
+  const gap = g.span * 0.001;
+  const lo = i > 0 ? state.thresholds[i - 1] + gap : g.min;
+  const hi = i < state.thresholds.length - 1 ? state.thresholds[i + 1] - gap : g.max;
+  return Math.min(Math.max(v, Math.min(lo, hi)), Math.max(lo, hi));
+}
+
+/** Move one level, updating the readouts but not the (expensive) geometry. */
+function setLevel(i, v) {
+  state.thresholds[i] = v;
+  $('thrList').value = state.thresholds.map(t => t.toFixed(1)).join('\n');
+  updateDerived();
+  updateDolineReadout();
+  paintHist();
+}
+
+histoEl.addEventListener('pointerdown', e => {
+  if (!state.hist || e.button !== 0) return;
+  const { g, x, value } = histoAt(e);
+  const i = levelNear(g, x);
+  histo.drag = { i, startX: x, orig: i >= 0 ? state.thresholds[i] : null, value, moved: false };
+  if (i >= 0) histo.active = i;
+  histoEl.setPointerCapture(e.pointerId);
+  histoEl.focus({ preventScroll: true });
+  paintHist();
+});
+
+histoEl.addEventListener('pointermove', e => {
   if (!state.hist) return;
-  const rect = $('histo').getBoundingClientRect();
-  const frac = (e.clientX - rect.left) / rect.width;
-  const { min, max } = state.hist;
-  const val = min + frac * (max - min);
-  const tolPx = 7 / rect.width * (max - min);
-  const hit = state.thresholds.findIndex(t => Math.abs(t - val) < tolPx);
-  if (hit >= 0) state.thresholds.splice(hit, 1);
-  else state.thresholds.push(val);
-  state.thresholds.sort((a, b) => a - b);
+  const { g, x, value } = histoAt(e);
+  const d = histo.drag;
+
+  if (d && d.i >= 0) {
+    if (!d.moved && Math.abs(x - d.startX) > 3) d.moved = true;
+    if (d.moved) {
+      histo.hover = null;
+      setLevel(d.i, clampLevel(snapLevel(value, g, e.altKey), d.i, g));
+    }
+    return;
+  }
+
+  histo.hover = value;
+  histoEl.style.cursor = levelNear(g, x) >= 0 ? 'ew-resize' : 'crosshair';
+  paintHist();
+});
+
+function endLevelDrag(e) {
+  const d = histo.drag;
+  histo.drag = null;
+  if (!d || !state.hist) return;
+  if (histoEl.hasPointerCapture?.(e.pointerId)) histoEl.releasePointerCapture(e.pointerId);
+
+  if (d.i >= 0 && !d.moved) {                       // click a marker → drop that level
+    state.thresholds.splice(d.i, 1);
+    histo.active = -1;
+  } else if (d.i < 0) {                             // click open ground → add one
+    const v = snapLevel(d.value, histoGeom(histoEl, state.hist), e.altKey);
+    state.thresholds.push(v);
+    state.thresholds.sort((a, b) => a - b);
+    histo.active = state.thresholds.indexOf(v);
+  }
+  writeThresholds();
+  scheduleRebuild();
+}
+
+histoEl.addEventListener('pointerup', endLevelDrag);
+histoEl.addEventListener('pointercancel', e => {
+  if (histo.drag?.i >= 0 && histo.drag.moved) setLevel(histo.drag.i, histo.drag.orig);
+  histo.drag = null;
+  renderHist();
+});
+histoEl.addEventListener('pointerleave', () => {
+  if (histo.drag) return;
+  histo.hover = null;
+  paintHist();
+});
+
+histoEl.addEventListener('keydown', e => {
+  if (!state.hist) return;
+  const i = histo.active;
+
+  if (e.key === 'Escape') {
+    if (histo.drag?.moved && histo.drag.i >= 0) {   // abandon the drag in progress
+      setLevel(histo.drag.i, histo.drag.orig);
+      histo.drag = null;
+    }
+    histo.active = -1;
+    renderHist();
+    return;
+  }
+  if (i < 0 || i >= state.thresholds.length) return;
+
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault();
+    state.thresholds.splice(i, 1);
+    histo.active = -1;
+    writeThresholds();
+    scheduleRebuild();
+    return;
+  }
+  const dir = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+  if (!dir) return;
+  e.preventDefault();
+  const g = histoGeom(histoEl, state.hist);
+  const step = snapStep(g.span) * (e.shiftKey ? 5 : e.altKey ? 0.1 : 1);
+  setLevel(i, clampLevel(+(state.thresholds[i] + dir * step).toFixed(4), i, g));
+  scheduleRebuild();
+});
+
+$('histoLog').addEventListener('change', renderHist);
+
+$('histoClear').addEventListener('click', () => {
+  state.thresholds = [];
+  histo.active = -1;
   writeThresholds();
   scheduleRebuild();
 });
+
+/* ── panel and histogram sizing ──────────────────────────────────────── */
+
+const PANEL_DEFAULT = 352, PANEL_MIN = 300;
+const HISTO_DEFAULT = 110, HISTO_MIN = 90, HISTO_MAX = 620;
+
+const panelMax = () => Math.max(PANEL_MIN, Math.min(1000, window.innerWidth - 340));
+
+// Kept separately from the CSS variable so a narrow window can squeeze the
+// panel without the squeezed width becoming the remembered one.
+let panelWanted = PANEL_DEFAULT;
+
+function setPanelWidth(w, remember = true) {
+  if (remember) panelWanted = w;
+  const px = Math.round(Math.min(Math.max(w, PANEL_MIN), panelMax()));
+  document.documentElement.style.setProperty('--panelW', px + 'px');
+  if (remember) { try { localStorage.setItem('topo.panelW', px); } catch {} }
+  return px;
+}
+
+/** Re-fit the panel after the window changes size, keeping the wanted width. */
+function reflowPanel() {
+  if (window.innerWidth > 900) setPanelWidth(panelWanted, false);
+}
+
+function setHistoHeight(h) {
+  const px = Math.round(Math.min(Math.max(h, HISTO_MIN), HISTO_MAX));
+  document.documentElement.style.setProperty('--histoH', px + 'px');
+  try { localStorage.setItem('topo.histoH', px); } catch {}
+  return px;
+}
+
+/** Everything that has to be told the panel just changed width. */
+function afterPanelResize() {
+  map.invalidateSize({ animate: false });
+  drawFrame();
+  redraw();
+  renderHist();
+}
+
+/**
+ * Wire a drag handle. Cleanup runs on a lost capture as well as a normal
+ * release: a touch interrupted mid-drag must not leave the page stuck with a
+ * resize cursor and no text selection.
+ */
+function dragSize({ grip, vertical, apply, done, reset }) {
+  grip.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    grip.setPointerCapture(e.pointerId);
+    grip.classList.add('dragging');
+    document.body.classList.add(vertical ? 'resizing-v' : 'resizing');
+    let frame = 0, over = false;
+    const pos = ev => vertical ? ev.clientY : ev.clientX;
+
+    const move = ev => {
+      const at = pos(ev);
+      if (frame) return;
+      frame = requestAnimationFrame(() => { frame = 0; apply(at); });
+    };
+    const finish = (ev, commit) => {
+      if (over) return;                        // pointerup is followed by lostpointercapture
+      over = true;
+      grip.removeEventListener('pointermove', move);
+      grip.removeEventListener('pointerup', onUp);
+      grip.removeEventListener('pointercancel', onCancel);
+      grip.removeEventListener('lostpointercapture', onCancel);
+      grip.classList.remove('dragging');
+      document.body.classList.remove('resizing', 'resizing-v');
+      if (frame) { cancelAnimationFrame(frame); frame = 0; }
+      if (commit) apply(pos(ev));
+      done?.();
+    };
+    const onUp = ev => finish(ev, true);
+    const onCancel = ev => finish(ev, false);
+
+    grip.addEventListener('pointermove', move);
+    grip.addEventListener('pointerup', onUp);
+    grip.addEventListener('pointercancel', onCancel);
+    grip.addEventListener('lostpointercapture', onCancel);
+  });
+  grip.addEventListener('dblclick', reset);
+}
+
+dragSize({
+  grip: $('panelGrip'),
+  apply: x => { setPanelWidth(x - $('panel').getBoundingClientRect().left); afterPanelResize(); },
+  reset: () => { setPanelWidth(PANEL_DEFAULT); afterPanelResize(); },
+});
+
+dragSize({
+  grip: $('histoGrip'),
+  vertical: true,
+  apply: y => { setHistoHeight(y - histoEl.getBoundingClientRect().top); renderHist(); },
+  reset: () => { setHistoHeight(HISTO_DEFAULT); renderHist(); },
+});
+
+try {
+  const w = parseFloat(localStorage.getItem('topo.panelW'));
+  if (Number.isFinite(w)) setPanelWidth(w);
+  const h = parseFloat(localStorage.getItem('topo.histoH'));
+  if (Number.isFinite(h)) setHistoHeight(h);
+} catch {}
 
 /* ── build ───────────────────────────────────────────────────────────── */
 
@@ -1148,11 +1417,11 @@ $('prevSheet').addEventListener('click', () => stepView(-1));
 $('nextSheet').addEventListener('click', () => stepView(1));
 window.addEventListener('keydown', e => {
   if ((state.view !== 'sheet' && state.view !== 'nest') ||
-      e.target.matches('input,textarea,select')) return;
+      e.target.matches('input,textarea,select,#histo')) return;
   if (e.key === 'ArrowLeft') stepView(-1);
   if (e.key === 'ArrowRight') stepView(1);
 });
-window.addEventListener('resize', () => { redraw(); renderHistogram($('histo'), state.hist, state.thresholds); });
+window.addEventListener('resize', () => { reflowPanel(); redraw(); renderHist(); });
 
 /* ── export ──────────────────────────────────────────────────────────── */
 
@@ -1354,7 +1623,7 @@ function updateSteps() {
 $('smoothTerrain').addEventListener('input', () => {
   $('smoothTerrainOut').textContent = $('smoothTerrain').value;
   applyTerrainSmoothing();
-  renderHistogram($('histo'), state.hist, state.thresholds);
+  renderHist();
   scheduleRebuild();
 });
 $('smoothCurve').addEventListener('input', () => {
@@ -1406,6 +1675,6 @@ $('fitFrame').addEventListener('click', frameToView);
 window.topo = { state, rebuild, buildFiles, exportMeta, map };
 
 map.whenReady(() => setTimeout(() => { map.invalidateSize(); frameToView(); }, 60));
-renderHistogram($('histo'), null, []);
+renderHist();
 updateSteps();
 setStatus('Pick an area, then fetch elevation');

@@ -227,10 +227,80 @@ export function renderNest(canvas, nest, model) {
   ctx.restore();
 }
 
-/** Elevation histogram with the current levels marked. */
-export function renderHistogram(canvas, hist, thresholds) {
+/* ── elevation histogram ─────────────────────────────────────────────── */
+
+// Insets: room for the level handles above the plot, tick labels below, and a
+// little slack at each end so a level sitting on the range limit still draws a
+// whole marker.
+const H_PADX = 10, H_TOP = 14, H_BOT = 16;
+
+/**
+ * Mapping between elevations and pixels for the histogram, shared by the
+ * renderer and the pointer handling that drags levels around.
+ */
+export function histoGeom(canvas, hist) {
+  const cw = canvas.clientWidth || 1;
+  const min = hist ? hist.min : 0;
+  const max = hist ? hist.max : 1;
+  const span = (max - min) || 1;
+  const w = Math.max(1, cw - H_PADX * 2);
+  return {
+    cw, min, max, span, padX: H_PADX,
+    toX: v => H_PADX + (v - min) / span * w,
+    toValue: x => min + (x - H_PADX) / w * span,
+    perPx: span / w,
+  };
+}
+
+/** Decimals worth showing for a level, given how much ground the range covers. */
+export function levelDecimals(span) {
+  return span < 20 ? 2 : span < 200 ? 1 : 0;
+}
+
+/** 1, 2 or 5 × 10ⁿ — the step sizes that read as round numbers on an axis. */
+function niceStep(raw) {
+  if (!(raw > 0)) return 1;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / mag;
+  return (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * mag;
+}
+
+/** Decimals a tick needs, from its step — a 0.5 m step must not print "1 1 2". */
+function tickDecimals(step) {
+  return Math.min(3, Math.max(0, -Math.floor(Math.log10(step))));
+}
+
+/** The increment a dragged level snaps to, so hand-picked levels stay tidy. */
+export function snapStep(span) {
+  return niceStep(span / 200);
+}
+
+function fmtLevel(v, span) {
+  return v.toFixed(levelDecimals(span));
+}
+
+function roundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * Elevation histogram with the current levels marked.
+ *
+ * Bands behind the bars are tinted with the same ramp the stack preview uses,
+ * so a level dragged here can be read as "this is the plate that colour".
+ */
+export function renderHistogram(canvas, hist, thresholds, opts = {}) {
+  const { hover = null, active = -1, logScale = false } = opts;
   const dpr = window.devicePixelRatio || 1;
-  const cw = canvas.clientWidth, ch = canvas.clientHeight || 110;
+  const cw = canvas.clientWidth || 1;
+  const ch = canvas.clientHeight || 110;
   canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -244,30 +314,145 @@ export function renderHistogram(canvas, hist, thresholds) {
     return;
   }
 
-  const { counts, min, max } = hist;
+  const g = histoGeom(canvas, hist);
+  const { counts, min, max, span } = { ...hist, span: g.span };
+  const yTop = H_TOP, yBase = ch - H_BOT;
+  const plotH = Math.max(6, yBase - yTop);
+
+  const levels = (thresholds || []).filter(Number.isFinite).slice().sort((a, b) => a - b);
+
+  // Layer bands: everything above a level is one more plate in the stack. A
+  // faint tint across the plot says which band you are in; the solid ribbon
+  // along the baseline shows the plate colours as the stack preview draws them.
+  const inRange = levels.filter(t => t > min && t < max);
+  const edges = [min, ...inRange, max];
+  const ribbon = Math.min(8, Math.max(4, plotH * 0.08));
+  for (let i = 0; i < edges.length - 1; i++) {
+    const x0 = g.toX(edges[i]), x1 = g.toX(edges[i + 1]);
+    const w = Math.max(0, x1 - x0);
+    ctx.fillStyle = layerFill(i, edges.length - 1);
+    ctx.globalAlpha = 0.18;
+    ctx.fillRect(x0, yTop, w, plotH - ribbon);
+    ctx.globalAlpha = 1;
+    ctx.fillRect(x0, yBase - ribbon, w, ribbon);
+  }
+  ctx.globalAlpha = 1;
+
+  // Bars. A log count scale keeps the thin tail of high ground visible when a
+  // few coastal bins hold most of the samples.
   const peak = Math.max(...counts) || 1;
-  const bw = cw / counts.length;
-  ctx.fillStyle = '#3d4653';
+  const scale = logScale
+    ? c => Math.log1p(c) / Math.log1p(peak)
+    : c => c / peak;
+  const bw = (g.cw - H_PADX * 2) / counts.length;
+  const barH = plotH - ribbon;
+  ctx.fillStyle = 'rgba(226,233,244,0.4)';
   for (let i = 0; i < counts.length; i++) {
-    const h = (counts[i] / peak) * (ch - 18);
-    ctx.fillRect(i * bw, ch - 14 - h, Math.max(1, bw - 0.5), h);
+    if (!counts[i]) continue;
+    const h = scale(counts[i]) * barH;
+    ctx.fillRect(H_PADX + i * bw, yBase - ribbon - h, Math.max(1, bw - 0.5), h);
   }
 
-  ctx.strokeStyle = '#e8913a';
-  ctx.fillStyle = '#e8913a';
+  // Baseline and axis ticks.
+  ctx.strokeStyle = '#39414e';
   ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(H_PADX, yBase + 0.5); ctx.lineTo(g.cw - H_PADX, yBase + 0.5); ctx.stroke();
+
   ctx.font = '9px ui-monospace, monospace';
+  ctx.fillStyle = '#6b7482';
   ctx.textAlign = 'center';
-  for (const t of thresholds || []) {
-    const x = (t - min) / (max - min || 1) * cw;
-    if (x < 0 || x > cw) continue;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch - 14); ctx.stroke();
-    ctx.beginPath(); ctx.arc(x, 3.5, 3, 0, Math.PI * 2); ctx.fill();
+  // Counted in whole steps rather than accumulated, so a fractional step over a
+  // shallow range neither drifts nor prints the same label twice.
+  const step = niceStep(span / Math.max(2, Math.floor((g.cw - H_PADX * 2) / 74)));
+  const tdp = tickDecimals(step);
+  const endLabel = fmtLevel(min, span) + ' m', endLabel2 = fmtLevel(max, span) + ' m';
+  const reserveL = ctx.measureText(endLabel).width + 4;
+  const reserveR = ctx.measureText(endLabel2).width + 4;
+  for (let k = Math.ceil(min / step); k * step <= max; k++) {
+    const v = k * step;
+    const x = g.toX(v);
+    const label = v.toFixed(tdp);
+    const half = ctx.measureText(label).width / 2 + 8;
+    if (x - half < reserveL || x + half > g.cw - reserveR) continue;  // corners carry the ends
+    ctx.strokeStyle = '#39414e';
+    ctx.beginPath(); ctx.moveTo(x, yBase); ctx.lineTo(x, yBase + 3); ctx.stroke();
+    ctx.fillText(label, x, ch - 4);
+  }
+  ctx.textAlign = 'left';
+  ctx.fillText(endLabel, 2, ch - 4);
+  ctx.textAlign = 'right';
+  ctx.fillText(endLabel2, g.cw - 2, ch - 4);
+
+  // Levels.
+  const tall = plotH > 104;
+  for (let i = 0; i < levels.length; i++) {
+    const t = levels[i];
+    const x = g.toX(t);
+    if (x < -2 || x > g.cw + 2) continue;
+    const isActive = i === active;
+    ctx.strokeStyle = isActive ? '#f2b46b' : '#e8913a';
+    ctx.fillStyle = isActive ? '#f2b46b' : '#e8913a';
+    ctx.lineWidth = isActive ? 1.8 : 1;
+    ctx.beginPath(); ctx.moveTo(x, yTop - 4); ctx.lineTo(x, yBase); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, yTop - 7, isActive ? 4.5 : 3.4, 0, Math.PI * 2); ctx.fill();
+    if (isActive) {
+      ctx.strokeStyle = 'rgba(242,180,107,0.35)';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, yTop - 7, 7, 0, Math.PI * 2); ctx.stroke();
+    }
+
+    // Value alongside the line, once the panel is wide or tall enough to read
+    // it without the labels colliding.
+    const gapL = i > 0 ? x - g.toX(levels[i - 1]) : Infinity;
+    const gapR = i < levels.length - 1 ? g.toX(levels[i + 1]) - x : Infinity;
+    if (tall && (isActive || Math.min(gapL, gapR) > 26)) {
+      ctx.save();
+      ctx.translate(x - 3, yBase - ribbon - 4);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = 'left';
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.lineWidth = 2.5;                       // dark outline: readable over the bars
+      ctx.strokeStyle = 'rgba(18,20,24,0.85)';
+      ctx.lineJoin = 'round';
+      ctx.strokeText(fmtLevel(t, span) + ' m', 0, 0);
+      ctx.fillStyle = isActive ? '#f2b46b' : '#e8a45e';
+      ctx.fillText(fmtLevel(t, span) + ' m', 0, 0);
+      ctx.restore();
+    }
   }
 
-  ctx.fillStyle = '#6b7482';
-  ctx.textAlign = 'left';
-  ctx.fillText(Math.round(min) + ' m', 3, ch - 3);
-  ctx.textAlign = 'right';
-  ctx.fillText(Math.round(max) + ' m', cw - 3, ch - 3);
+  // Hover guide, with the elevation under the pointer and how much of the map
+  // sits below it — the number that tells you whether a level is worth a plate.
+  if (hover != null && hover >= min && hover <= max) {
+    const x = g.toX(hover);
+    ctx.save();
+    ctx.setLineDash([2, 3]);
+    ctx.strokeStyle = 'rgba(226,233,244,0.45)';
+    ctx.beginPath(); ctx.moveTo(x, yTop); ctx.lineTo(x, yBase); ctx.stroke();
+    ctx.restore();
+
+    let below = 0, total = 0;
+    const bin = Math.min(counts.length - 1, Math.max(0, Math.floor((hover - min) / span * counts.length)));
+    for (let i = 0; i < counts.length; i++) { total += counts[i]; if (i < bin) below += counts[i]; }
+    const pct = total ? Math.round(below / total * 100) : 0;
+    tag(ctx, `${fmtLevel(hover, span)} m · ${pct}% below`, x, yTop - 3, g.cw, '#c9d3e2', 'rgba(20,22,26,0.9)');
+  }
+
+  if (active >= 0 && active < levels.length) {
+    tag(ctx, fmtLevel(levels[active], span) + ' m', g.toX(levels[active]),
+        hover != null ? yTop + 12 : yTop - 3, g.cw, '#1a1206', '#f2b46b');
+  }
+}
+
+/** Small readout pinned inside the canvas so it never runs off an edge. */
+function tag(ctx, text, x, y, cw, fg, bg) {
+  ctx.font = '10px ui-monospace, monospace';
+  const w = ctx.measureText(text).width + 10;
+  const bx = Math.max(1, Math.min(cw - w - 1, x - w / 2));
+  const by = Math.max(1, y - 12);
+  ctx.fillStyle = bg;
+  roundedRect(ctx, bx, by, w, 13, 3);
+  ctx.fillStyle = fg;
+  ctx.textAlign = 'center';
+  ctx.fillText(text, bx + w / 2, by + 9.5);
 }
