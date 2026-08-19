@@ -10,14 +10,6 @@
 import { simplifyPath } from './contour.js';
 import { COLOURS } from './svg.js';
 
-/** Outward normal of edge p→q for a ring of the given winding. */
-function edgeNormal(p, q, sign) {
-  const dx = q[0] - p[0], dy = q[1] - p[1];
-  const L = Math.hypot(dx, dy);
-  if (L < 1e-9) return null;
-  return [sign * dy / L, -sign * dx / L];
-}
-
 function signedArea(r) {
   let a = 0;
   for (let i = 0, j = r.length - 1; i < r.length; j = i++)
@@ -25,7 +17,7 @@ function signedArea(r) {
   return a / 2;
 }
 
-/** Rings thinned for interactive redraw; full cut precision is wasted here. */
+/** Rings thinned to what the screen can actually resolve, and cached per scale. */
 function previewRings(sheet, tol) {
   if (sheet._r3d && sheet._r3dTol === tol) return sheet._r3d;
   const out = [];
@@ -40,6 +32,14 @@ function previewRings(sheet, tol) {
 }
 
 const shade = (h, s, l) => `hsl(${h.toFixed(0)}, ${s.toFixed(0)}%, ${l.toFixed(0)}%)`;
+
+// Projected ring coordinates, reused frame to frame. Every node of every plate
+// passes through here on each redraw, so this is the one place worth keeping
+// free of allocation.
+let bufX = new Float64Array(0), bufY = new Float64Array(0);
+function scratch(n) {
+  if (bufX.length < n) { bufX = new Float64Array(n * 2); bufY = new Float64Array(n * 2); }
+}
 
 /**
  * @param model {sheets, sheetW, sheetH, thickness}
@@ -92,57 +92,73 @@ export function render3D(canvas, model, view) {
   ctx.closePath(); ctx.filter = 'blur(6px)'; ctx.fill();
   ctx.restore();
 
-  const tol = Math.max(0.25, 0.5 / Math.max(0.35, s * 0.02));
+  // Thin the rings only below what a pixel can show — a third of a device
+  // pixel, in millimetres. At any normal zoom that keeps every node the cut
+  // geometry has, so the turntable draws the same shape as the stacked preview
+  // and the sheets; only a model shrunk right down loses detail it could not
+  // have displayed anyway.
+  const tol = 0.33 / (s * dpr);
+
+  // A plate's top face sits a fixed distance up the screen from its bottom, and
+  // height does not move screen x at all, so one projection per node serves the
+  // walls and the top alike.
+  const riseS = t * ct * s;
 
   sheets.forEach((sheet, i) => {
-    const zb = i * t, zt = (i + 1) * t;
+    const zb = i * t;
     const rings = previewRings(sheet, tol);
     const k = sheets.length > 1 ? i / (sheets.length - 1) : 1;
 
     // Three wall buckets by which way each face turns, so the model reads as
     // lit rather than flat, at three fills per layer instead of one per quad.
     const walls = [new Path2D(), new Path2D(), new Path2D()];
+    const top = new Path2D();
+
     for (const { pts, sign } of rings) {
-      for (let j = 1; j < pts.length; j++) {
+      const n = pts.length;
+      scratch(n);
+      for (let j = 0; j < n; j++) {
+        const a = pts[j][0] - W / 2, b = pts[j][1] - H / 2;
+        bufX[j] = ox + (a * cy - b * sy) * s;
+        bufY[j] = oy + ((a * sy + b * cy) * st - zb * ct) * s;
+      }
+
+      for (let j = 1; j < n; j++) {
         const p = pts[j - 1], q = pts[j];
-        const n = edgeNormal(p, q, sign);
-        if (!n) continue;
-        const nxr = n[0] * cy - n[1] * sy;      // normal after the spin
-        const nyr = n[0] * sy + n[1] * cy;
+        const dx = q[0] - p[0], dy = q[1] - p[1];
+        const L = Math.hypot(dx, dy);
+        if (L < 1e-9) continue;
+        const nx = sign * dy / L, ny = -sign * dx / L;
+        const nxr = nx * cy - ny * sy;           // normal after the spin
+        const nyr = nx * sy + ny * cy;
         if (nyr * st < -0.02) continue;          // faces away — its own top hides it
         const bucket = walls[nxr < -0.35 ? 0 : nxr > 0.35 ? 2 : 1];
-        const a1 = S(p[0], p[1], zb), b1 = S(q[0], q[1], zb);
-        const b2 = S(q[0], q[1], zt), a2 = S(p[0], p[1], zt);
-        bucket.moveTo(a1[0], a1[1]);
-        bucket.lineTo(b1[0], b1[1]);
-        bucket.lineTo(b2[0], b2[1]);
-        bucket.lineTo(a2[0], a2[1]);
+        const xa = bufX[j - 1], ya = bufY[j - 1], xb = bufX[j], yb = bufY[j];
+        bucket.moveTo(xa, ya);
+        bucket.lineTo(xb, yb);
+        bucket.lineTo(xb, yb - riseS);
+        bucket.lineTo(xa, ya - riseS);
         bucket.closePath();
       }
+
+      top.moveTo(bufX[0], bufY[0] - riseS);
+      for (let j = 1; j < n; j++) top.lineTo(bufX[j], bufY[j] - riseS);
+      top.closePath();
     }
+
     const wl = 20 + 26 * Math.pow(k, 0.85);
     [-6, 0, 7].forEach((d, b) => {
       ctx.fillStyle = shade(32 - 5 * k, 24 - 9 * k, wl + d);
       ctx.fill(walls[b]);
     });
-
-    // top face
-    const top = new Path2D();
-    for (const { pts } of rings) {
-      const a = S(pts[0][0], pts[0][1], zt);
-      top.moveTo(a[0], a[1]);
-      for (let j = 1; j < pts.length; j++) {
-        const c = S(pts[j][0], pts[j][1], zt);
-        top.lineTo(c[0], c[1]);
-      }
-      top.closePath();
-    }
     ctx.fillStyle = shade(34 - 6 * k, 26 - 12 * k, 32 + 47 * Math.pow(k, 0.85));
     ctx.fill(top, 'evenodd');
 
     ctx.strokeStyle = 'rgba(0,0,0,0.30)';
     ctx.lineWidth = 0.7;
     ctx.stroke(top);
+
+    const zt = zb + t;
 
     // engraved detail, clipped to the plate it belongs to
     if (sheet.features) {
