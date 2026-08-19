@@ -703,29 +703,45 @@ function afterPanelResize() {
   renderHist();
 }
 
+/**
+ * Wire a drag handle. Cleanup runs on a lost capture as well as a normal
+ * release: a touch interrupted mid-drag must not leave the page stuck with a
+ * resize cursor and no text selection.
+ */
 function dragSize({ grip, vertical, apply, done, reset }) {
   grip.addEventListener('pointerdown', e => {
     e.preventDefault();
     grip.setPointerCapture(e.pointerId);
     grip.classList.add('dragging');
     document.body.classList.add(vertical ? 'resizing-v' : 'resizing');
-    let frame = 0, last = null;
+    let frame = 0, over = false;
+    const pos = ev => vertical ? ev.clientY : ev.clientX;
+
     const move = ev => {
-      last = vertical ? ev.clientY : ev.clientX;
+      const at = pos(ev);
       if (frame) return;
-      frame = requestAnimationFrame(() => { frame = 0; apply(last); });
+      frame = requestAnimationFrame(() => { frame = 0; apply(at); });
     };
-    const up = ev => {
+    const finish = (ev, commit) => {
+      if (over) return;                        // pointerup is followed by lostpointercapture
+      over = true;
       grip.removeEventListener('pointermove', move);
-      grip.removeEventListener('pointerup', up);
+      grip.removeEventListener('pointerup', onUp);
+      grip.removeEventListener('pointercancel', onCancel);
+      grip.removeEventListener('lostpointercapture', onCancel);
       grip.classList.remove('dragging');
       document.body.classList.remove('resizing', 'resizing-v');
       if (frame) { cancelAnimationFrame(frame); frame = 0; }
-      apply(vertical ? ev.clientY : ev.clientX);
+      if (commit) apply(pos(ev));
       done?.();
     };
+    const onUp = ev => finish(ev, true);
+    const onCancel = ev => finish(ev, false);
+
     grip.addEventListener('pointermove', move);
-    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointerup', onUp);
+    grip.addEventListener('pointercancel', onCancel);
+    grip.addEventListener('lostpointercapture', onCancel);
   });
   grip.addEventListener('dblclick', reset);
 }

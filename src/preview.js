@@ -265,6 +265,11 @@ function niceStep(raw) {
   return (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * mag;
 }
 
+/** Decimals a tick needs, from its step — a 0.5 m step must not print "1 1 2". */
+function tickDecimals(step) {
+  return Math.min(3, Math.max(0, -Math.floor(Math.log10(step))));
+}
+
 /** The increment a dragged level snaps to, so hand-picked levels stay tidy. */
 export function snapStep(span) {
   return niceStep(span / 200);
@@ -356,18 +361,27 @@ export function renderHistogram(canvas, hist, thresholds, opts = {}) {
   ctx.font = '9px ui-monospace, monospace';
   ctx.fillStyle = '#6b7482';
   ctx.textAlign = 'center';
+  // Counted in whole steps rather than accumulated, so a fractional step over a
+  // shallow range neither drifts nor prints the same label twice.
   const step = niceStep(span / Math.max(2, Math.floor((g.cw - H_PADX * 2) / 74)));
-  for (let v = Math.ceil(min / step) * step; v <= max; v += step) {
+  const tdp = tickDecimals(step);
+  const endLabel = fmtLevel(min, span) + ' m', endLabel2 = fmtLevel(max, span) + ' m';
+  const reserveL = ctx.measureText(endLabel).width + 4;
+  const reserveR = ctx.measureText(endLabel2).width + 4;
+  for (let k = Math.ceil(min / step); k * step <= max; k++) {
+    const v = k * step;
     const x = g.toX(v);
-    if (x < H_PADX + 26 || x > g.cw - H_PADX - 26) continue;   // corners carry the range ends
+    const label = v.toFixed(tdp);
+    const half = ctx.measureText(label).width / 2 + 8;
+    if (x - half < reserveL || x + half > g.cw - reserveR) continue;  // corners carry the ends
     ctx.strokeStyle = '#39414e';
     ctx.beginPath(); ctx.moveTo(x, yBase); ctx.lineTo(x, yBase + 3); ctx.stroke();
-    ctx.fillText(Math.round(v), x, ch - 4);
+    ctx.fillText(label, x, ch - 4);
   }
   ctx.textAlign = 'left';
-  ctx.fillText(Math.round(min) + ' m', 2, ch - 4);
+  ctx.fillText(endLabel, 2, ch - 4);
   ctx.textAlign = 'right';
-  ctx.fillText(Math.round(max) + ' m', g.cw - 2, ch - 4);
+  ctx.fillText(endLabel2, g.cw - 2, ch - 4);
 
   // Levels.
   const tall = plotH > 104;
