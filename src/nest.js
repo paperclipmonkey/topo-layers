@@ -74,10 +74,12 @@ export function packParts(parts, opts) {
 
   // What the board can actually give a part: the stock, less the edge margin on
   // both sides. A board with no edge margin is usable corner to corner, so a
-  // 400x600 sheet cuts from 400x600 stock.
+  // 400x600 sheet cuts from 400x600 stock. Written to reject a NaN too, which is
+  // what a cleared number field hands over.
   const capW = stockW - margin * 2, capH = stockH - margin * 2;
-  const capacity = { w: Math.max(0, capW), h: Math.max(0, capH) };
-  if (capW <= 0 || capH <= 0)
+  const usable = capW > 0 && capH > 0;
+  const capacity = usable ? { w: capW, h: capH } : { w: 0, h: 0 };
+  if (!usable)
     return { sheets: [], oversize: parts.map(p => p.id), utilisation: 0, capacity };
 
   // The gap belongs *between* parts, not around the board. Every part carries

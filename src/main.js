@@ -1511,20 +1511,25 @@ function computeNesting() {
   $('nestUseOut').textContent = n ? `${(state.nesting.utilisation * 100).toFixed(0)}%` : '—';
 
   // The board's own limit, stated in the same millimetres as the sheet size, so
-  // "too big" is a number you can act on rather than a verdict.
+  // "too big" is a number you can act on rather than a verdict. A board with
+  // nothing left on it — margin wider than the stock, or a field left empty —
+  // has no number to quote, so it says what to go and look at instead.
   const cap = res.capacity;
+  const usable = cap.w > 0 && cap.h > 0;
   const rot = $('allowRotate').checked;
   const capText = `${fmtMM(cap.w)} × ${fmtMM(cap.h)} mm` + (rot ? ' (either way round)' : '');
-  $('nestCapOut').textContent = cap.w > 0 && cap.h > 0 ? capText : 'nothing — margin eats the board';
+  $('nestCapOut').textContent = usable ? capText : 'none';
 
   const warn = $('nestWarn');
   if (res.oversize.length) {
     const margin = num('stockMargin');
     warn.hidden = false;
-    warn.textContent = `Too big for this stock: ${res.oversize.join(', ')}. ` +
-      `This board takes parts up to ${capText}` +
-      (margin > 0 ? `, after the ${fmtMM(margin)} mm edge margin` : '') +
-      `. Use a larger board, drop the edge margin, or reduce the sheet size in step 2.`;
+    warn.textContent = usable
+      ? `Too big for this stock: ${res.oversize.join(', ')}. ` +
+        `This board takes parts up to ${capText}` +
+        (margin > 0 ? `, after the ${fmtMM(margin)} mm edge margin` : '') +
+        `. Use a larger board, drop the edge margin, or reduce the sheet size in step 2.`
+      : `This stock leaves nothing to cut from — check the stock size and edge margin above.`;
   } else {
     warn.hidden = true;
   }
@@ -1923,7 +1928,9 @@ $('thickness').addEventListener('change', () => { if (state.view === 'three') re
 for (const id of ['sheetW', 'sheetH']) {
   $(id).addEventListener('change', () => {
     if ($('lockAspect').checked) applySheetAspect();
-    invalidateProjected();
+    // Redraw now rather than at the end of the debounced rebuild, so cleared
+    // detail leaves the screen when the status bar says it has gone.
+    if (invalidateProjected()) redraw();
     updateDerived();
     scheduleRebuild();
   });
