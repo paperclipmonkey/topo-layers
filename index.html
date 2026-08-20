@@ -279,11 +279,13 @@
           <label>Stock height <input type="number" id="stockH" value="400" min="20" max="3000" step="1"><span class="u">mm</span></label>
         </div>
         <div class="row">
-          <label>Edge margin <input type="number" id="stockMargin" value="5" min="0" max="60" step="0.5"><span class="u">mm</span></label>
+          <label>Edge margin <input type="number" id="stockMargin" value="0" min="0" max="60" step="0.5"><span class="u">mm</span></label>
           <label>Part gap <input type="number" id="partSpacing" value="3" min="0" max="60" step="0.5"><span class="u">mm</span></label>
         </div>
         <label class="chk"><input type="checkbox" id="allowRotate" checked> Let parts rotate 90°</label>
+        <p class="hint">At a zero edge margin the board is usable corner to corner, so a 400&nbsp;×&nbsp;600&nbsp;mm sheet cuts from 400&nbsp;×&nbsp;600&nbsp;mm stock. Raise it if your bed needs clamp room.</p>
         <dl class="kv">
+          <dt>Largest part</dt><dd id="nestCapOut">—</dd>
           <dt>Boards needed</dt><dd id="nestOut">—</dd>
           <dt>Material used</dt><dd id="nestUseOut">—</dd>
         </dl>

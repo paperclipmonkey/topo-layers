@@ -31,7 +31,11 @@ roughly 5 m per sample at UK latitudes.
 
 **Everything else** is OSM: the basemap, place search (Nominatim), and the
 vector features — lakes, rivers, roads, railways, buildings, woodland — fetched
-live from the Overpass API and engraved onto whichever layer they sit on.
+live from the Overpass API and engraved onto whichever layer they sit on. They
+come back as lon/lat and are kept as millimetres on the sheet they were fetched
+for, so moving the frame or changing the sheet size clears them: fetch them
+again for the piece as it now is. Imported GeoJSON is not cleared — the file is
+still to hand, so it is simply projected again.
 
 You can swap the elevation source for Mapbox Terrain-RGB (paste a token) or any
 custom `{z}/{x}/{y}` tile URL in either encoding.
@@ -256,11 +260,17 @@ as a full sheet with a lot of empty space around it. Parts are placed by
 MaxRects best-short-side-fit, largest first, and may be turned 90° where that
 helps; anything engraved on a part turns with it.
 
-*Edge margin* keeps parts clear of the board edge, *part gap* keeps them clear
-of each other — set that to at least a couple of kerfs so neighbouring cuts do
-not run into one another. Anything too large for the stock is listed rather than
-silently dropped, so a base layer bigger than your board is a warning, not a
-missing file.
+*Edge margin* keeps parts clear of the board edge and starts at zero, so the
+board is usable corner to corner: 400 × 600 mm stock takes a 400 × 600 mm sheet.
+Raise it if your bed needs clamp room. *Part gap* keeps parts clear of each
+other — set it to at least a couple of kerfs so neighbouring cuts do not run
+into one another. It is a gap *between* parts only; it is not also charged
+against the board edge, so it never costs you a millimetre of stock.
+
+*Largest part* reports what the board can actually take, so a piece that does
+not fit tells you by how much. Anything too large is listed rather than silently
+dropped, so a base layer bigger than your board is a warning, not a missing
+file.
 
 ## Settings worth understanding
 

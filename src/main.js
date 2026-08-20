@@ -17,6 +17,8 @@ import { controlValues, applyControlValues, changedFrom,
 
 const $ = id => document.getElementById(id);
 const num = id => parseFloat($(id).value);
+/** Millimetres for reading: whole numbers stay whole, halves keep their decimal. */
+const fmtMM = v => (Math.round(v * 10) / 10).toString();
 
 /* ── state ───────────────────────────────────────────────────────────── */
 
@@ -30,6 +32,7 @@ const state = {
   masks: null,         // per-sheet material coverage, drives feature and pin placement
   pins: [],
   features: null,
+  osmFor: null,        // frame and sheet size the OSM shapes were projected for
   places: [],          // named OSM points, engraved as labels
   geoText: null,       // imported GeoJSON, re-projected whenever the frame moves
   geoPoints: [],
@@ -252,6 +255,7 @@ function onAreaChanged() {
     const h = num('sheetW') / mercatorAspect(bb);
     if (isFinite(h) && h > 0) $('sheetH').value = h.toFixed(1);
   }
+  if (invalidateProjected()) redraw();
   updateDerived();
   updateSteps();
   syncURL();
@@ -1089,15 +1093,23 @@ async function fetchOsm() {
   setStatus('Querying OpenStreetMap…', 'busy');
   setProgress(0.1, 'Overpass can take a while for large areas…');
   try {
+    const sig = sheetSignature();
     const { features, places } = await fetchOsmFeatures({
       bbox: state.bbox, groups,
-      sheetW: num('sheetW'), sheetH: num('sheetH'),
+      sheetW: sig.sheetW, sheetH: sig.sheetH,
       simplifyTol: Math.max(0.05, num('simplifyTol')),
       minLength: 1.2,
       onProgress: setProgress, signal: ctrl.signal,
     });
+    // Overpass can take a while, and the piece may have been reshaped while it
+    // thought. These millimetres were measured on the sheet as it was.
+    if (!sameSheet(sig, sheetSignature())) {
+      setStatus('Sheet changed while Overpass was working — fetch OSM features again', 'err');
+      return false;
+    }
     state.features = features;
     state.places = places;
+    state.osmFor = sig;
     const counts = Object.entries(features)
       .map(([g, d]) => `${FEATURE_GROUPS[g].label.toLowerCase()} ${d.shapes.length}`);
     if (places.length) counts.push(`place names ${places.length}`);
@@ -1118,6 +1130,55 @@ async function fetchOsm() {
 }
 
 $('fetchOsm').addEventListener('click', () => fetchOsm());
+
+/**
+ * Anything drawn on the sheet is held in millimetres on *that* sheet, so moving
+ * the frame or changing the sheet size leaves it describing a piece that no
+ * longer exists — the symptom being an OSM layer marooned in a corner at the
+ * old scale.
+ *
+ * Imported GeoJSON survives it, because the file is still here to project
+ * again. OSM shapes do not: they were clipped and stitched to the old sheet on
+ * the way in and there is no lon/lat left to redo it from, so they are dropped,
+ * with a word to say they need fetching again for the new one.
+ *
+ * @returns true when something was dropped or re-projected, so the caller can
+ *          put the change on screen.
+ */
+function invalidateProjected() {
+  const stale = !!state.osmFor && !sameSheet(state.osmFor, sheetSignature());
+  if (stale) {
+    state.features = null;
+    state.places = [];
+    state.osmFor = null;
+    state.overlay = null;
+    $('osmOut').textContent = '—';
+    setStatus('Sheet changed — OSM features cleared, fetch them again', 'ok');
+  }
+
+  const moved = !!state.geoText;
+  if (moved) reprojectGeo();
+  if (!stale && !moved) return false;
+  assignFeatures();
+  return true;
+}
+
+/** Everything a projected coordinate depends on: the frame, and the sheet it maps onto. */
+function sheetSignature() {
+  const bb = state.bbox;
+  return bb ? { ...bb, sheetW: num('sheetW'), sheetH: num('sheetH') } : null;
+}
+
+/** True when two signatures describe the same piece. */
+function sameSheet(a, b) {
+  if (!a || !b) return false;
+  // A tenth of a microdegree is a centimetre of ground — far below anything the
+  // frame or the millimetre-precision sheet fields can express on purpose.
+  const near = (p, q) => Math.abs(p - q) < 1e-7;
+  return a.sheetW === b.sheetW && a.sheetH === b.sheetH &&
+         near(a.west, b.west) && near(a.east, b.east) &&
+         near(a.north, b.north) && near(a.south, b.south);
+}
 
 /* ── imported GeoJSON ────────────────────────────────────────────────── */
 
@@ -1449,11 +1510,26 @@ function computeNesting() {
   $('nestOut').textContent = n ? `${n} × ${num('stockW')}×${num('stockH')} mm` : '—';
   $('nestUseOut').textContent = n ? `${(state.nesting.utilisation * 100).toFixed(0)}%` : '—';
 
+  // The board's own limit, stated in the same millimetres as the sheet size, so
+  // "too big" is a number you can act on rather than a verdict. A board with
+  // nothing left on it — margin wider than the stock, or a field left empty —
+  // has no number to quote, so it says what to go and look at instead.
+  const cap = res.capacity;
+  const usable = cap.w > 0 && cap.h > 0;
+  const rot = $('allowRotate').checked;
+  const capText = `${fmtMM(cap.w)} × ${fmtMM(cap.h)} mm` + (rot ? ' (either way round)' : '');
+  $('nestCapOut').textContent = usable ? capText : 'none';
+
   const warn = $('nestWarn');
   if (res.oversize.length) {
+    const margin = num('stockMargin');
     warn.hidden = false;
-    warn.textContent = `Too big for this stock: ${res.oversize.join(', ')}. ` +
-      `Use a larger board, or reduce the sheet size in step 2.`;
+    warn.textContent = usable
+      ? `Too big for this stock: ${res.oversize.join(', ')}. ` +
+        `This board takes parts up to ${capText}` +
+        (margin > 0 ? `, after the ${fmtMM(margin)} mm edge margin` : '') +
+        `. Use a larger board, drop the edge margin, or reduce the sheet size in step 2.`
+      : `This stock leaves nothing to cut from — check the stock size and edge margin above.`;
   } else {
     warn.hidden = true;
   }
@@ -1852,6 +1928,9 @@ $('thickness').addEventListener('change', () => { if (state.view === 'three') re
 for (const id of ['sheetW', 'sheetH']) {
   $(id).addEventListener('change', () => {
     if ($('lockAspect').checked) applySheetAspect();
+    // Redraw now rather than at the end of the debounced rebuild, so cleared
+    // detail leaves the screen when the status bar says it has gone.
+    if (invalidateProjected()) redraw();
     updateDerived();
     scheduleRebuild();
   });

@@ -65,16 +65,30 @@ function occupy(bin, r) {
 /**
  * @param parts  [{id, w, h}] — part sizes in mm
  * @param opts   {stockW, stockH, margin, spacing, allowRotate}
- * @returns {sheets:[{placements:[{id,x,y,w,h,rot}]}], oversize:[id], utilisation}
+ * @returns {sheets:[{placements:[{id,x,y,w,h,rot}]}], oversize:[id], utilisation,
+ *           capacity:{w,h}} — capacity is the largest part the board can take.
  *          x/y are the part's top-left corner in stock-sheet coordinates.
  */
 export function packParts(parts, opts) {
-  const { stockW, stockH, margin = 5, spacing = 3, allowRotate = true } = opts;
-  const W = stockW - margin * 2, H = stockH - margin * 2;
-  if (W <= 0 || H <= 0) return { sheets: [], oversize: parts.map(p => p.id), utilisation: 0 };
+  const { stockW, stockH, margin = 0, spacing = 3, allowRotate = true } = opts;
 
-  // Grow each part by the spacing so packed neighbours keep their gap, then
-  // place the most awkward parts first.
+  // What the board can actually give a part: the stock, less the edge margin on
+  // both sides. A board with no edge margin is usable corner to corner, so a
+  // 400x600 sheet cuts from 400x600 stock. Written to reject a NaN too, which is
+  // what a cleared number field hands over.
+  const capW = stockW - margin * 2, capH = stockH - margin * 2;
+  const usable = capW > 0 && capH > 0;
+  const capacity = usable ? { w: capW, h: capH } : { w: 0, h: 0 };
+  if (!usable)
+    return { sheets: [], oversize: parts.map(p => p.id), utilisation: 0, capacity };
+
+  // The gap belongs *between* parts, not around the board. Every part carries
+  // its own gap on the right and bottom, so the bin gets one extra gap on those
+  // two sides to pay for it: neighbours still sit a full gap apart, and a part
+  // that fills the board no longer loses a gap's worth to the edge.
+  const W = capW + spacing, H = capH + spacing;
+
+  // Place the most awkward parts first.
   const items = parts
     .map(p => ({ id: p.id, w: p.w, h: p.h, pw: p.w + spacing, ph: p.h + spacing }))
     .sort((a, b) => Math.max(b.pw, b.ph) - Math.max(a.pw, a.ph) ||
@@ -115,6 +129,7 @@ export function packParts(parts, opts) {
     sheets: bins.map(b => ({ placements: b.placements })),
     oversize,
     utilisation: stockArea ? partArea / stockArea : 0,
+    capacity,
   };
 }
 
