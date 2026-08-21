@@ -115,7 +115,15 @@ export function formatBBox(bb) {
   return [bb.south, bb.west, bb.north, bb.east].map(v => v.toFixed(6)).join(',');
 }
 
+/**
+ * The levels a link carries, or an empty list. Empty entries are dropped before
+ * anything is parsed: `Number('')` is 0, not NaN, so a link with no `levels=` at
+ * all — hand-trimmed, or made before any had been chosen — would otherwise come
+ * back as a single level at sea level and be honoured as a deliberate choice,
+ * building a one-layer piece instead of generating a set.
+ */
 export function parseLevels(text) {
-  return String(text || '').split(',')
+  return String(text ?? '').split(',')
+    .map(s => s.trim()).filter(s => s !== '')
     .map(Number).filter(Number.isFinite).sort((a, b) => a - b);
 }
