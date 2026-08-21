@@ -1050,8 +1050,33 @@ const pixIndex = (mask, p) => {
   return y * mask.mw + x;
 };
 
+/**
+ * Everything derived from the levels, taken off the screen.
+ *
+ * Clearing the levels used to leave the last piece standing: `rebuild` bailed
+ * out before it could replace anything, so the previews, the layer count, the
+ * download buttons and the step markers all went on describing a stack there
+ * was no longer anything behind — the bar offered a ZIP of it while step 3 sat
+ * empty. What is on screen has to be what the settings say.
+ */
+function clearBuild() {
+  state.sheets = [];
+  state.masks = null;
+  state.pins = [];
+  state.overlay = null;
+  state.nesting = null;
+  for (const id of ['layersOut', 'nodesOut', 'nestOut', 'nestUseOut', 'nestCapOut', 'labelOut'])
+    $(id).textContent = '—';
+  $('nestWarn').hidden = true;
+  $('dlZip').disabled = $('dlNest').disabled = true;
+  updateDerived();
+  updateSteps();
+  redraw();
+}
+
 async function rebuild() {
-  if (!state.smoothed || !state.thresholds.length) return;
+  if (!state.smoothed) return;
+  if (!state.thresholds.length) { clearBuild(); return; }
   const W = num('sheetW'), H = num('sheetH');
   const kerf = num('kerf') || 0;
 
@@ -1975,6 +2000,13 @@ function nextStep() {
     return { key: 'dem', title: 'Fetch the elevation',
              hint: `Your area is ${$('groundOut').textContent}. This downloads the terrain under it — free, and no key needed.`,
              label: 'Fetch elevation', run: () => $('fetchDem').click() };
+  // Levels are normally generated the moment the elevation lands, so this only
+  // comes up after they have been cleared — at which point "Build the layers"
+  // was the offer, and it had nothing to build from.
+  if (!state.thresholds.length)
+    return { key: 'levels', title: 'Set the layer heights',
+             hint: 'Each layer is one sheet of material. Generate a set, or place them yourself on the histogram.',
+             label: 'Generate levels', run: () => $('genThresholds').click() };
   if (!state.sheets.length)
     return { key: 'export', title: 'Build the layers',
              hint: 'Turn the elevation into cut geometry.',
@@ -1985,6 +2017,11 @@ function nextStep() {
            label: 'Download ZIP', run: () => $('dlZip').click() };
 }
 
+// The scroll-behavior an option carries beats the one the stylesheet sets, so
+// the reduced-motion rule in the CSS cannot reach a programmatic scroll. Asked
+// here instead, live, because the preference can change while the page is open.
+const noMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+
 /** Open a step's section, put it on screen and mark it, so it cannot be missed. */
 function revealStep(key) {
   const g = document.querySelector(`.grp[data-flow="${key}"]`);
@@ -1993,7 +2030,7 @@ function revealStep(key) {
   g.classList.remove('flash');
   void g.offsetWidth;                    // restart the animation even on the same node
   g.classList.add('flash');
-  g.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  g.scrollIntoView({ block: 'nearest', behavior: noMotion?.matches ? 'auto' : 'smooth' });
 }
 
 // Which step the bar was offering last time, so the panel only jumps when the
@@ -2244,11 +2281,38 @@ async function restoreShared(p) {
 // materials, kept in the markup where the panel's copy lives.
 $('matPreset').innerHTML = $('material').innerHTML;
 
+// A dialog has to take the keyboard with it, or someone tabbing lands on the
+// panel behind a modal they cannot see past. Focus goes in on open, stays
+// inside while it is up, and goes back to whatever opened it on close.
 const helpModal = $('helpModal');
-const openHelp = () => { helpModal.hidden = false; };
-const closeHelp = () => { helpModal.hidden = true; };
+const FOCUSABLE = 'a[href],button:not(:disabled),input:not(:disabled),' +
+                  'select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
+const inModal = () => [...helpModal.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
+let helpOpener = null;
+
+function openHelp() {
+  helpOpener = document.activeElement;
+  helpModal.hidden = false;
+  (helpModal.querySelector('.btn.primary') || inModal()[0])?.focus();
+}
+function closeHelp() {
+  helpModal.hidden = true;
+  helpOpener?.focus?.();
+  helpOpener = null;
+}
 $('helpBtn').addEventListener('click', openHelp);
 helpModal.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeHelp(); });
+helpModal.addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const items = inModal();
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  const here = document.activeElement;
+  if (e.shiftKey ? here === first : here === last) {
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  }
+});
 window.addEventListener('keydown', e => { if (e.key === 'Escape' && !helpModal.hidden) closeHelp(); });
 
 // The next-step bar is the whole flow, and it is also the easiest thing in the
