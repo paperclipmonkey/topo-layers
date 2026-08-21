@@ -4,96 +4,80 @@
 
 **Turn any place on Earth into a stack of laser-cuttable layers.**
 
-Pick your area on a map, choose where the contours fall, check the piece in 3D,
-and download laser-ready SVGs. Free, no account, no API key, nothing to install
-— it all runs in your browser.
+Pick an area on a map, choose where the contours fall, check the piece in 3D,
+and download laser-ready SVGs. Free, no account, no API key, nothing to
+install — it all runs in your browser.
 
 ### [→ Open Topo Layers](https://paperclipmonkey.github.io/topo-layers/)
 
 <a href="https://paperclipmonkey.github.io/topo-layers/">
-  <img src="assets/hero-3d.jpg" alt="Snowdon as thirteen stacked plywood layers, previewed in 3D" width="900">
+  <img src="assets/hero-3d.jpg" alt="Snowdon as thirteen stacked plywood layers, previewed in 3D" width="880">
 </a>
 
-<sub>Snowdon, 300 × 200 mm, thirteen layers of 3 mm birch ply — previewed before anything is cut.</sub>
+<sub>Snowdon, 300 × 200 mm, thirteen layers of 3 mm birch ply.</sub>
 
 </div>
 
 ---
 
-Layered topographic wall art — the kind sold as a laser-cut map of a mountain or
-a coastline — but where *you* choose the place, the size, the aspect ratio, the
+Layered topographic wall art — the kind sold as a laser-cut map of a mountain
+or a coastline — but where *you* choose the place, the size, the shape, the
 material, and exactly which elevations to split at.
 
 Give it a frame on the map and it fetches the terrain, slices it into contour
-layers, cleans each one up into geometry a laser can actually cut, engraves the
+layers, cleans each one into geometry a laser can actually cut, engraves the
 rivers, roads and place names onto the layer they belong to, packs the lot onto
 your stock boards, and hands you a ZIP.
 
-**What you need:** a laser cutter (or a cutting service), some sheet material,
-and glue. **What it costs:** nothing.
+**You need** a laser cutter (or a cutting service), some sheet material, and
+glue. **It costs** nothing.
+
+### [Open a finished one ↗](https://paperclipmonkey.github.io/topo-layers/#v=1&nLevels=12&sheetW=300&sheetH=200&bbox=53.045000,-4.120000,53.098000,-4.020000&levels=141.139,216.379,291.62,366.86,442.1,517.341,592.581,667.822,743.062,818.302,893.543,968.783)
+
+That link is Snowdon, already built — it rebuilds the whole piece in your
+browser and lands on the 3D turntable with it turning. Every piece you make has
+a link like it, sitting in the address bar.
 
 ## Four steps
 
-The panel walks you through it. The four sections that are actually a sequence
-are numbered and carry a *do this / done* marker, and the bar at the bottom of
-the panel always offers the one action that comes next. Everything else is
-optional detail you can ignore.
+The panel walks you through it. Four sections are numbered and carry a *do
+this / done* marker, and the bar at the bottom always offers the one action
+that comes next. Everything else is optional detail you can ignore.
 
-1. **Choose the area.** Search for a place, or drag the frame over the map. The
-   frame is anchored to the ground, so it stays over the same terrain while you
-   pan. Any aspect ratio: either the frame drives the sheet proportions or the
-   sheet drives the frame.
-2. **Fetch the elevation.** One click. Terrain heights come from an open,
-   keyless dataset — there is nothing to sign up for.
-3. **Set the layer heights.** Each layer is one sheet of material. Eight is a
-   good start. Pick a spacing rule, or drag the markers on the elevation
-   histogram to place levels by hand.
-4. **Build & download.** You get one SVG per layer, the layers nested onto your
-   stock boards, an alignment jig and a manifest — all in one ZIP.
+| | Step | What happens |
+| --- | --- | --- |
+| **1** | **Choose the area** | Search for a place, or drag the frame over the map. Any aspect ratio — the frame stays anchored to the ground as you pan. |
+| **2** | **Fetch the elevation** | One click. Terrain heights come from an open, keyless dataset; there is nothing to sign up for. |
+| **3** | **Set the layer heights** | Each layer is one sheet of material. Eight is a good start. Pick a spacing rule, or drag markers on the elevation histogram to place them by hand. |
+| **4** | **Build & download** | One SVG per layer, the layers nested onto your stock boards, an alignment jig and a manifest — all in one ZIP. |
 
 Then cut, and glue bottom layer first.
 
 <p align="center">
-  <img src="assets/screenshot-map.jpg" alt="Step 1: the frame dragged over Snowdon on a topographic basemap" width="900">
-  <br><sub><b>Step 1.</b> Drag the frame over the ground you want. Any aspect ratio; the frame stays anchored as you pan.</sub>
+  <img src="assets/screenshot-map.jpg" alt="Step 1: the frame dragged over Snowdon on a topographic basemap" width="880">
+  <br><sub><b>Step 1.</b> Drag the frame over the ground you want.</sub>
 </p>
 
 <p align="center">
-  <img src="assets/screenshot-stacked.jpg" alt="The Stacked tab: the finished piece seen from above" width="900">
-  <br><sub><b>Stacked.</b> The finished piece from above, zoomable to 24× — for checking a name clears its terrace before you commit a sheet of ply to it.</sub>
+  <img src="assets/screenshot-engraved.jpg" alt="The Stacked tab: Snowdon from above with rivers, lakes and Welsh place names engraved on the layers they fall on" width="880">
+  <br><sub><b>Checking it.</b> The finished piece from above, with rivers, lakes and place names engraved on whichever layer is the visible surface there. Zoom to 24× to check a name clears its terrace before you commit a sheet of ply to it.</sub>
 </p>
 
-## Before you cut: the 3D tab
+## Check it in 3D before you cut
 
-The **3D** tab builds the stack from the layers and your material thickness and
-lets you turn it around: drag to turn, <kbd>shift</kbd>-drag (or right-drag) to
-pan, scroll to zoom in to 14×, double-click or **Reset view** to go back — or
-tick *Spin* and leave it turning. Zoom is anchored to the pointer, so whatever
-you are looking at is what you close in on, and the outlines are re-thinned as
-you go, so a plate edge stays true at any magnification rather than turning into
-a polygon.
+The **3D** tab builds the stack from your layers and your material thickness and
+lets you turn it around — drag to turn, <kbd>shift</kbd>-drag to pan, scroll to
+zoom, or tick *Spin* and leave it going.
 
-The model is fitted to the widest orientation it will ever take rather than to
-whichever way it happens to be facing, so it holds still while it turns instead
-of pulsing bigger and smaller as the rectangle goes corner-on and edge-on.
+Set your **real material thickness** on the card in the corner and the model
+changes under your hand: every plate is drawn as one sheet of that stock, at
+true scale against the piece, with the layer count, stack height and vertical
+exaggeration reading out beside the control. The material picker — plywood, MDF,
+walnut, acrylic — changes only how the preview looks.
 
-Set your **real material thickness** there, on the card in the corner, and the
-model changes under your hand: every plate is drawn as one sheet of that stock,
-at true scale against the piece, with the layer count, stack height and vertical
-exaggeration reading out beside the control. The material picker changes only
-how the preview looks — plywood, MDF, walnut, acrylic — so what you see is
-roughly what comes off the bed.
-
-This is worth doing every time, because it shows how much relief you will
-actually get, and that is usually less than people expect: thirteen layers of
-3 mm ply is 39 mm of stack on a 300 mm piece. Seeing that beats any number.
-
-There is no 3D library behind it. The layers nest strictly — each sits wholly
-inside and above the one below — so with the camera above the stack, drawing
-bottom plate to top plate is exactly correct painter's order, and no depth
-buffer is needed. Within a plate the walls are drawn first and the top face over
-them, which hides the back walls for free: a back wall projects into the
-interior of its own top face, while a front wall projects clear of it.
+Worth doing every time, because it shows how much relief you actually get, and
+that is usually less than people expect: thirteen layers of 3 mm ply is 39 mm of
+stack on a 300 mm piece. Seeing it beats any number.
 
 ## What comes out
 
@@ -108,29 +92,34 @@ interior of its own top face, while a front wall projects clear of it.
 
 SVGs are in millimetre user units with a physical `width`/`height`, so they
 import at true size into LightBurn, Illustrator and Inkscape. Stroke colour
-separates operations, which is how most laser software assigns layers:
+separates cut from engrave, which is how most laser software assigns layers —
+the full colour key is [in the reference](#reference).
 
-| Colour | Operation |
-| --- | --- |
-| `#000000` black | **cut** — part outline and pin holes |
-| `#B4B4B4` grey | **engrave** — outline of the layer above, as a glue guide |
-| `#00E0E0` / `#0000FF` | lakes / rivers |
-| `#FF0000` / `#FF00FF` | roads / railways |
-| `#FF8000` / `#00E000` | buildings / woodland |
-| `#8000FF` / `#FF0080` | place names / imported points |
+## Common questions
 
-## Sharing a piece
+**Do I need a laser cutter?** To cut it, yes — or a cutting service; the SVGs
+are standard files any of them will take. To design a piece and look at it in
+3D, no.
 
-The address bar always holds a link back to the piece on screen — frame, every
-setting, and the exact levels. **Copy share link** puts it on the clipboard;
-opening one fetches the terrain again, rebuilds the stack and lands on the 3D
-turntable with it turning, so a link you send is a link to look at. Paste one
-into a tab that already has the app open and it rebuilds there too. Engraved map
-detail is re-queried only if the link was made with it fetched, and it arrives
-after the model is already up rather than holding it back.
+**What material?** 3 mm birch ply is the usual choice and what the defaults
+assume. Anything you can cut works — MDF, basswood, acrylic, even greyboard.
+Thicker stock means more relief per layer and a chunkier piece.
 
-What a link never carries: your elevation API token, and any GeoJSON you loaded
-— both stay on your machine.
+**How big should it be?** 300 × 200 mm with 8–14 layers is a good first piece.
+More layers means finer terrain and a taller stack, but also more cutting and
+more gluing.
+
+**Which places work well?** Anywhere with relief: mountains, valleys, islands,
+coastlines. Flat ground gives you flat art. Coastlines cut beautifully — put a
+level at 0 m for the shoreline.
+
+**Does it send my data anywhere?** No. Everything runs in your browser; the only
+requests are for public map and terrain tiles. A share link never carries your
+elevation API token or any GeoJSON you loaded.
+
+**Something looks wrong in the export.** Check the **Stacked** tab zoomed in —
+most surprises are a name running off its terrace or a feature smaller than the
+*Min feature* setting being dropped.
 
 ## Running it locally
 
@@ -142,8 +131,8 @@ cd topo-layers
 python3 serve.py          # → http://localhost:8777
 ```
 
-It needs to be served over HTTP rather than opened as a `file://` URL, because
-the browser blocks cross-origin tile reads from `file://`. `serve.py` is just
+It has to be served over HTTP rather than opened as a `file://` URL, because the
+browser blocks cross-origin tile reads from `file://`. `serve.py` is just
 `http.server` with caching turned off — with caching on, an edited module keeps
 running from cache while the page reloads around it, which looks exactly like a
 code change having no effect. Pass a port to use a different one:
@@ -155,6 +144,49 @@ edit and a refresh is the whole loop.
 ---
 
 # Reference
+
+<details>
+<summary><strong>Cut and engrave colour key</strong></summary>
+
+Stroke colour separates operations, which is how most laser software assigns
+layers:
+
+| Colour | Operation |
+| --- | --- |
+| `#000000` black | **cut** — part outline and pin holes |
+| `#B4B4B4` grey | **engrave** — outline of the layer above, as a glue guide |
+| `#00E0E0` / `#0000FF` | lakes / rivers |
+| `#FF0000` / `#FF00FF` | roads / railways |
+| `#FF8000` / `#00E000` | buildings / woodland |
+| `#8000FF` / `#FF0080` | place names / imported points |
+
+</details>
+
+<details>
+<summary><strong>How the 3D view is drawn</strong></summary>
+
+There is no 3D library behind it. The layers nest strictly — each sits wholly
+inside and above the one below — so with the camera above the stack, drawing
+bottom plate to top plate is exactly correct painter's order, and no depth
+buffer is needed. Within a plate the walls are drawn first and the top face over
+them, which hides the back walls for free: a back wall projects into the
+interior of its own top face, while a front wall projects clear of it.
+
+The model is fitted to the circle its corners turn through rather than to
+whichever silhouette it happens to be presenting. A rectangle is wider corner-on
+than edge-on, so fitting the current view rescaled a spinning piece every frame
+and it pulsed; the circle is the tightest bound that holds for every angle, so
+the piece holds still while it turns.
+
+Zoom is anchored to the pointer, so whatever you are looking at is what you
+close in on, and the outlines are re-thinned per scale, so a plate edge stays
+true at any magnification rather than turning into a polygon.
+
+Plates are one colour all the way up, as a sheet of board is, shaded by how much
+light a terrace gets rather than faded light-to-dark like a height map, with the
+cut edges darker and browner as the laser leaves them.
+
+</details>
 
 <details>
 <summary><strong>Where the data comes from</strong></summary>
