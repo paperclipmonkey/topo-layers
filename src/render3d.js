@@ -31,7 +31,29 @@ function previewRings(sheet, tol) {
   return out;
 }
 
-const shade = (h, s, l) => `hsl(${h.toFixed(0)}, ${s.toFixed(0)}%, ${l.toFixed(0)}%)`;
+const shade = (h, s, l) =>
+  `hsl(${h.toFixed(0)}, ${Math.max(0, Math.min(100, s)).toFixed(0)}%, ${Math.max(0, Math.min(100, l)).toFixed(0)}%)`;
+
+/** Plywood, unless the caller names something else. */
+const DEFAULT_MATERIAL = { h: 34, s: 34, l: 58 };
+
+/**
+ * Real stock is one colour all the way up: every plate is a sheet of the same
+ * board. Earlier this faded light-to-dark over the stack, which read as a
+ * height map rather than as material. What actually varies with depth is how
+ * much light reaches a terrace — the plates above shade it — so the ramp is now
+ * a shallow ambient one, and the plates are told apart by their cut edges
+ * instead. Those edges are the laser's, so they are darker and browner than the
+ * face: char, not shadow.
+ */
+function palette(mat) {
+  const m = mat && Number.isFinite(mat.h) ? mat : DEFAULT_MATERIAL;
+  return {
+    // k runs 0 at the base to 1 at the summit
+    top: k => shade(m.h, m.s * (0.94 + 0.06 * k), m.l - 17 * Math.pow(1 - k, 1.15)),
+    wall: (k, d) => shade(m.h - 4, m.s * 0.8, m.l * 0.5 - 9 * Math.pow(1 - k, 1.15) + d),
+  };
+}
 
 // Projected ring coordinates, reused frame to frame. Every node of every plate
 // passes through here on each redraw, so this is the one place worth keeping
@@ -42,11 +64,20 @@ function scratch(n) {
 }
 
 /**
- * @param model {sheets, sheetW, sheetH, thickness}
- * @param view  {yaw, tilt, zoom}  tilt in radians above the horizon
+ * @param model {sheets, sheetW, sheetH, thickness, material}
+ *              `thickness` is the real material thickness in millimetres, drawn
+ *              to the same scale as the sheet, so the stack stands exactly as
+ *              tall against the piece as the cut one will. `material` is an
+ *              {h, s, l} base colour for the stock.
+ * @param view  {yaw, tilt, zoom, x, y}  tilt in radians above the horizon;
+ *              x/y pan the model on screen, in CSS pixels, for looking closely
+ *              at a corner of a piece that no longer fits the window.
  */
 export function render3D(canvas, model, view) {
-  const { sheets, sheetW: W, sheetH: H, thickness: t } = model;
+  const { sheets, sheetW: W, sheetH: H } = model;
+  // A blank or nonsensical thickness field would otherwise collapse the whole
+  // stack to a flat sheet, or send every coordinate to NaN.
+  const t = Number.isFinite(model.thickness) && model.thickness > 0 ? model.thickness : 3;
   const dpr = window.devicePixelRatio || 1;
   const cw = canvas.clientWidth, ch = canvas.clientHeight;
   if (canvas.width !== Math.round(cw * dpr)) canvas.width = Math.round(cw * dpr);
@@ -57,6 +88,7 @@ export function render3D(canvas, model, view) {
   ctx.clearRect(0, 0, cw, ch);
   if (!sheets?.length) return;
 
+  const pal = palette(model.material);
   const yaw = view.yaw, tilt = Math.max(0.12, Math.min(Math.PI / 2, view.tilt));
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
   const ct = Math.cos(tilt), st = Math.sin(tilt);
@@ -66,19 +98,23 @@ export function render3D(canvas, model, view) {
   const px = (x, y) => (x - W / 2) * cy - (y - H / 2) * sy;
   const py = (x, y, z) => ((x - W / 2) * sy + (y - H / 2) * cy) * st - z * ct;
 
-  // fit the whole stack in view
-  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const [cx, cyy] of [[0, 0], [W, 0], [0, H], [W, H]]) {
-    for (const z of [0, stackH]) {
-      const X = px(cx, cyy), Y = py(cx, cyy, z);
-      if (X < x0) x0 = X; if (X > x1) x1 = X;
-      if (Y < y0) y0 = Y; if (Y > y1) y1 = Y;
-    }
-  }
+  // Fit the stack in view — but from bounds that do not depend on the yaw.
+  //
+  // Fitting the *current* silhouette makes the model breathe as it turns: a
+  // rectangle is wider corner-on than edge-on, so a spinning piece was rescaled
+  // every frame, and it pulsed. The footprint is a W × H rectangle turning about
+  // its centre, so whatever the yaw it stays inside the circle through its
+  // corners; taking that radius fits once and holds. The piece then sits a
+  // little smaller when it happens to be edge-on, which is the price of never
+  // moving under you while you look at it.
+  const R = Math.hypot(W, H) / 2;
+  const x0 = -R, x1 = R;
+  const y0 = -R * st - stackH * ct, y1 = R * st;
   const pad = 26;
-  const s = Math.min((cw - pad * 2) / (x1 - x0), (ch - pad * 2) / (y1 - y0)) * (view.zoom || 1);
-  const ox = cw / 2 - (x0 + x1) / 2 * s;
-  const oy = ch / 2 - (y0 + y1) / 2 * s;
+  const fit = Math.min((cw - pad * 2) / (x1 - x0), (ch - pad * 2) / (y1 - y0));
+  const s = fit * (view.zoom || 1);
+  const ox = cw / 2 - (x0 + x1) / 2 * s + (view.x || 0);
+  const oy = ch / 2 - (y0 + y1) / 2 * s + (view.y || 0);
   const S = (x, y, z) => [ox + px(x, y) * s, oy + py(x, y, z) * s];
 
   // ground shadow, to seat the model
@@ -146,16 +182,17 @@ export function render3D(canvas, model, view) {
       top.closePath();
     }
 
-    const wl = 20 + 26 * Math.pow(k, 0.85);
-    [-6, 0, 7].forEach((d, b) => {
-      ctx.fillStyle = shade(32 - 5 * k, 24 - 9 * k, wl + d);
+    [-5, 0, 6].forEach((d, b) => {
+      ctx.fillStyle = pal.wall(k, d);
       ctx.fill(walls[b]);
     });
-    ctx.fillStyle = shade(34 - 6 * k, 26 - 12 * k, 32 + 47 * Math.pow(k, 0.85));
+    ctx.fillStyle = pal.top(k);
     ctx.fill(top, 'evenodd');
 
-    ctx.strokeStyle = 'rgba(0,0,0,0.30)';
-    ctx.lineWidth = 0.7;
+    // With one colour up the whole stack it is this line, not a change of
+    // tone, that separates a plate from the terrace it sits on.
+    ctx.strokeStyle = 'rgba(0,0,0,0.42)';
+    ctx.lineWidth = 0.9;
     ctx.stroke(top);
 
     const zt = zb + t;

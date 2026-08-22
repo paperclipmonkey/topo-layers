@@ -1,26 +1,195 @@
+<div align="center">
+
 # Topo Layers
 
-A single-page app for turning any map area into a stack of laser-cuttable
-vector layers — the multi-layer topographic wall art thing, but where *you*
-choose the area, the aspect ratio, and exactly which elevations to split at.
+**Turn any place on Earth into a stack of laser-cuttable layers.**
 
-No build step, no npm install, no API keys.
+Pick an area on a map, choose where the contours fall, check the piece in 3D,
+and download laser-ready SVGs. Free, no account, no API key, nothing to
+install — it all runs in your browser.
 
-**→ [paperclipmonkey.github.io/topo-layers](https://paperclipmonkey.github.io/topo-layers/)**
+### [→ Open Topo Layers](https://paperclipmonkey.github.io/topo-layers/)
 
-## Run it locally
+<a href="https://paperclipmonkey.github.io/topo-layers/">
+  <img src="assets/hero-3d.jpg" alt="Snowdon as thirteen stacked plywood layers, previewed in 3D" width="880">
+</a>
+
+<sub>Snowdon, 300 × 200 mm, thirteen layers of 3 mm birch ply.</sub>
+
+</div>
+
+---
+
+Layered topographic wall art — the kind sold as a laser-cut map of a mountain
+or a coastline — but where *you* choose the place, the size, the shape, the
+material, and exactly which elevations to split at.
+
+Give it a frame on the map and it fetches the terrain, slices it into contour
+layers, cleans each one into geometry a laser can actually cut, engraves the
+rivers, roads and place names onto the layer they belong to, packs the lot onto
+your stock boards, and hands you a ZIP.
+
+**You need** a laser cutter (or a cutting service), some sheet material, and
+glue. **It costs** nothing.
+
+### [Open a finished one ↗](https://paperclipmonkey.github.io/topo-layers/#v=1&nLevels=12&sheetW=300&sheetH=200&bbox=53.045000,-4.120000,53.098000,-4.020000&levels=141.139,216.379,291.62,366.86,442.1,517.341,592.581,667.822,743.062,818.302,893.543,968.783)
+
+That link is Snowdon, already built — it rebuilds the whole piece in your
+browser and lands on the 3D turntable with it turning. Every piece you make has
+a link like it, sitting in the address bar.
+
+## Four steps
+
+The panel walks you through it. Four sections are numbered and carry a *do
+this / done* marker, and the bar at the bottom always offers the one action
+that comes next. Everything else is optional detail you can ignore.
+
+| | Step | What happens |
+| --- | --- | --- |
+| **1** | **Choose the area** | Search for a place, or drag the frame over the map. Any aspect ratio — the frame stays anchored to the ground as you pan. |
+| **2** | **Fetch the elevation** | One click. Terrain heights come from an open, keyless dataset; there is nothing to sign up for. |
+| **3** | **Set the layer heights** | Each layer is one sheet of material. Eight is a good start. Pick a spacing rule, or drag markers on the elevation histogram to place them by hand. |
+| **4** | **Build & download** | One SVG per layer, the layers nested onto your stock boards, an alignment jig and a manifest — all in one ZIP. |
+
+Then cut, and glue bottom layer first.
+
+<p align="center">
+  <img src="assets/screenshot-map.jpg" alt="Step 1: the frame dragged over Snowdon on a topographic basemap" width="880">
+  <br><sub><b>Step 1.</b> Drag the frame over the ground you want.</sub>
+</p>
+
+<p align="center">
+  <img src="assets/screenshot-engraved.jpg" alt="The Stacked tab: Snowdon from above with rivers, lakes and Welsh place names engraved on the layers they fall on" width="880">
+  <br><sub><b>Checking it.</b> The finished piece from above, with rivers, lakes and place names engraved on whichever layer is the visible surface there. Zoom to 24× to check a name clears its terrace before you commit a sheet of ply to it.</sub>
+</p>
+
+## Check it in 3D before you cut
+
+The **3D** tab builds the stack from your layers and your material thickness and
+lets you turn it around — drag to turn, <kbd>shift</kbd>-drag to pan, scroll to
+zoom, or tick *Spin* and leave it going.
+
+Set your **real material thickness** on the card in the corner and the model
+changes under your hand: every plate is drawn as one sheet of that stock, at
+true scale against the piece, with the layer count, stack height and vertical
+exaggeration reading out beside the control. The material picker — plywood, MDF,
+walnut, acrylic — changes only how the preview looks.
+
+Worth doing every time, because it shows how much relief you actually get, and
+that is usually less than people expect: thirteen layers of 3 mm ply is 39 mm of
+stack on a 300 mm piece. Seeing it beats any number.
+
+## What comes out
+
+| File | What it is |
+| --- | --- |
+| `nesting-01.svg`, … | **what you cut** — every layer packed onto stock boards |
+| `01_base.svg`, `02_120m.svg`, … | one sheet per layer, bottom first, each in its own file |
+| `all-layers-in-register.svg` | all layers overlaid, colour-coded — for checking alignment |
+| `alignment-jig.svg` | a board with every outline engraved, to position pieces while gluing |
+| `points-key.csv` | number → name, sheet and coordinates for imported points |
+| `manifest.json`, `README.txt` | the exact parameters used, and cutting notes |
+
+SVGs are in millimetre user units with a physical `width`/`height`, so they
+import at true size into LightBurn, Illustrator and Inkscape. Stroke colour
+separates cut from engrave, which is how most laser software assigns layers —
+the full colour key is [in the reference](#reference).
+
+## Common questions
+
+**Do I need a laser cutter?** To cut it, yes — or a cutting service; the SVGs
+are standard files any of them will take. To design a piece and look at it in
+3D, no.
+
+**What material?** 3 mm birch ply is the usual choice and what the defaults
+assume. Anything you can cut works — MDF, basswood, acrylic, even greyboard.
+Thicker stock means more relief per layer and a chunkier piece.
+
+**How big should it be?** 300 × 200 mm with 8–14 layers is a good first piece.
+More layers means finer terrain and a taller stack, but also more cutting and
+more gluing.
+
+**Which places work well?** Anywhere with relief: mountains, valleys, islands,
+coastlines. Flat ground gives you flat art. Coastlines cut beautifully — put a
+level at 0 m for the shoreline.
+
+**Does it send my data anywhere?** No. Everything runs in your browser; the only
+requests are for public map and terrain tiles. A share link never carries your
+elevation API token or any GeoJSON you loaded.
+
+**Something looks wrong in the export.** Check the **Stacked** tab zoomed in —
+most surprises are a name running off its terrace or a feature smaller than the
+*Min feature* setting being dropped.
+
+## Running it locally
+
+No build step, no `npm install`, no bundler. Clone it and serve the folder:
 
 ```bash
-cd /Users/michaelwaterworth/map-generator && python3 serve.py
+git clone https://github.com/paperclipmonkey/topo-layers.git
+cd topo-layers
+python3 serve.py          # → http://localhost:8777
 ```
 
-Then open <http://localhost:8781>. It needs to be served over HTTP rather than
-opened as a `file://` URL, because the browser blocks cross-origin tile reads
-from `file://`. `serve.py` is just `http.server` with caching turned off — with
-caching on, an edited module keeps running from cache while the page reloads
-around it, which looks exactly like a code change having no effect.
+It has to be served over HTTP rather than opened as a `file://` URL, because the
+browser blocks cross-origin tile reads from `file://`. `serve.py` is just
+`http.server` with caching turned off — with caching on, an edited module keeps
+running from cache while the page reloads around it, which looks exactly like a
+code change having no effect. Pass a port to use a different one:
+`python3 serve.py 9000`.
 
-## Where the data comes from
+Everything under `src/` is a plain ES module the browser loads directly, so an
+edit and a refresh is the whole loop.
+
+---
+
+# Reference
+
+<details>
+<summary><strong>Cut and engrave colour key</strong></summary>
+
+Stroke colour separates operations, which is how most laser software assigns
+layers:
+
+| Colour | Operation |
+| --- | --- |
+| `#000000` black | **cut** — part outline and pin holes |
+| `#B4B4B4` grey | **engrave** — outline of the layer above, as a glue guide |
+| `#00E0E0` / `#0000FF` | lakes / rivers |
+| `#FF0000` / `#FF00FF` | roads / railways |
+| `#FF8000` / `#00E000` | buildings / woodland |
+| `#8000FF` / `#FF0080` | place names / imported points |
+
+</details>
+
+<details>
+<summary><strong>How the 3D view is drawn</strong></summary>
+
+There is no 3D library behind it. The layers nest strictly — each sits wholly
+inside and above the one below — so with the camera above the stack, drawing
+bottom plate to top plate is exactly correct painter's order, and no depth
+buffer is needed. Within a plate the walls are drawn first and the top face over
+them, which hides the back walls for free: a back wall projects into the
+interior of its own top face, while a front wall projects clear of it.
+
+The model is fitted to the circle its corners turn through rather than to
+whichever silhouette it happens to be presenting. A rectangle is wider corner-on
+than edge-on, so fitting the current view rescaled a spinning piece every frame
+and it pulsed; the circle is the tightest bound that holds for every angle, so
+the piece holds still while it turns.
+
+Zoom is anchored to the pointer, so whatever you are looking at is what you
+close in on, and the outlines are re-thinned per scale, so a plate edge stays
+true at any magnification rather than turning into a polygon.
+
+Plates are one colour all the way up, as a sheet of board is, shaded by how much
+light a terrace gets rather than faded light-to-dark like a height map, with the
+cut edges darker and browner as the laser leaves them.
+
+</details>
+
+<details>
+<summary><strong>Where the data comes from</strong></summary>
 
 **Elevation** is *not* in OpenStreetMap — OSM is a vector database of nodes and
 ways, and it carries almost no terrain height. So heights come from
@@ -38,73 +207,66 @@ again for the piece as it now is. Imported GeoJSON is not cleared — the file i
 still to hand, so it is simply projected again.
 
 You can swap the elevation source for Mapbox Terrain-RGB (paste a token) or any
-custom `{z}/{x}/{y}` tile URL in either encoding.
+custom `{z}/{x}/{y}` tile URL in either encoding, under *Detail and data source*
+in step 2.
 
-## How it works
+The basemap and Overpass are volunteer-run services on a fair-use policy — fine
+for personal use, but don't point heavy traffic at them.
 
-The panel walks you through it: the four sections that are actually a sequence
-show a **do this / done** marker, and a bar at the bottom always offers the one
-action that comes next. Everything else is optional detail you can ignore.
+</details>
 
-1. **Area** — pan/zoom, then drag the frame or its corners. The frame is
-   anchored to the ground, so it stays over the same terrain while you pan. Any
-   aspect ratio; either the frame drives the sheet proportions or the sheet
-   drives the frame.
-2. **Elevation** — terrain tiles covering the frame are fetched, decoded
+<details>
+<summary><strong>How a layer is made</strong></summary>
+
+1. **Elevation.** Terrain tiles covering the frame are fetched, decoded
    (`h = R·256 + G + B/256 − 32768`), mosaicked and resampled to a grid whose
    cells are square in Mercator.
-3. **Levels** — pick how many layers and where they sit: equal interval, equal
-   area (quantile), or snapped to round contour intervals. Or type exact heights,
-   or work directly on the elevation histogram: drag a marker to move a level,
-   click open ground to add one, click a marker to remove it. Levels snap to
-   round numbers unless you hold <kbd>Alt</kbd>, arrow keys nudge whichever one
-   is selected, and the readout under the pointer tells you how much of the map
-   lies below that height. Drag the panel edge, or the bar under the plot, when
-   you want a bigger picking area; a log count scale brings out the thin tail of
-   high ground that a coastal spike would otherwise flatten.
-4. **Contours** — marching squares (`d3-contour`) produces, for each level, the
+2. **Levels.** Pick how many layers and where they sit: equal interval, equal
+   area (quantile), or snapped to round contour intervals. Or type exact
+   heights, or work directly on the elevation histogram: drag a marker to move a
+   level, click open ground to add one, click a marker to remove it. Levels snap
+   to round numbers unless you hold <kbd>Alt</kbd>, arrow keys nudge whichever
+   one is selected, and the readout under the pointer tells you how much of the
+   map lies below that height. Drag the panel edge, or the bar under the plot,
+   when you want a bigger picking area; a log count scale brings out the thin
+   tail of high ground that a coastal spike would otherwise flatten.
+3. **Contours.** Marching squares (`d3-contour`) produces, for each level, the
    closed region of ground above it. Holes are preserved, so a caldera or a lake
    basin cuts out properly.
-5. **Clean-up for the laser** — Chaikin smoothing to take the stair-step out of
+4. **Clean-up for the laser.** Chaikin smoothing to take the stair-step out of
    the DEM, Douglas–Peucker simplification, removal of islands and holes too
    small to survive the cut, and optional kerf compensation.
-6. **Export** — one SVG per layer plus assembly aids, in a ZIP.
+5. **Export.** One SVG per layer plus assembly aids, in a ZIP.
 
-The address bar always holds a link back to the piece on screen — frame, every
-setting, and the exact levels. **Copy share link** puts it on the clipboard;
-opening one fetches the terrain again, rebuilds the stack and lands on the 3D
-turntable with it turning, so a link you send is a link to look at. Paste one
-into a tab that already has the app open and it rebuilds there too. Engraved
-OSM detail is re-queried only if the link was made with features fetched, and
-it arrives after the model is already up rather than holding it back. What a
-link never carries: your elevation API token, and any GeoJSON you loaded —
-both stay on your machine.
+</details>
 
-## Output
+<details>
+<summary><strong>Settings worth understanding</strong></summary>
 
-| File | What it is |
-| --- | --- |
-| `nesting-01.svg`, … | **what you cut** — every layer packed onto stock boards |
-| `01_base.svg`, `02_120m.svg`, … | one sheet per layer, bottom first, each in its own file |
-| `all-layers-in-register.svg` | all layers overlaid, colour-coded — for checking alignment |
-| `alignment-jig.svg` | a board with every outline engraved, to position pieces while gluing |
-| `points-key.csv` | number → name, sheet and coordinates for imported points |
-| `manifest.json`, `README.txt` | the exact parameters used, and cutting notes |
+**Min feature** drops any island smaller than roughly this square. Set it to
+about 2–3× your material thickness — anything smaller tends to char through,
+fall into the machine, or snap when you handle it.
 
-SVGs are in millimetre user units with a physical `width`/`height`, so they
-import at true size into LightBurn, Illustrator and Inkscape. Stroke colour
-separates operations, which is how most laser software assigns layers:
+**Kerf** widens each part by half the beam width so the cut piece comes out at
+nominal size. Leave it at 0 if LightBurn is already applying kerf offset,
+otherwise you will double up.
 
-| Colour | Operation |
-| --- | --- |
-| `#000000` black | **cut** — part outline and pin holes |
-| `#B4B4B4` grey | **engrave** — outline of the layer above, as a glue guide |
-| `#00E0E0` / `#0000FF` | lakes / rivers |
-| `#FF0000` / `#FF00FF` | roads / railways |
-| `#FF8000` / `#00E000` | buildings / woodland |
-| `#8000FF` / `#FF0080` | place names / imported points |
+**Vertical exaggeration** is shown live, in the panel and beside the thickness
+control in the 3D view. It is the ratio of the horizontal scale to the vertical
+scale: material thickness ÷ contour interval, against ground metres per sheet
+millimetre. Real terrain at 1:1 looks disappointingly flat at wall-art size, so
+5–20× is normal. Change it by changing the contour interval or the material
+thickness.
 
-## Lettering and your own points
+**Terrain smoothing** blurs the elevation grid before contouring. One or two
+passes removes DEM quantisation without losing real landforms. **Curve
+smoothing** rounds the resulting outlines; segments running along the sheet edge
+are deliberately held rigid so the rectangle stays square.
+
+</details>
+
+<details>
+<summary><strong>Lettering, place names and your own points</strong></summary>
 
 Place names and peaks come from OSM and are engraved onto whichever layer is the
 visible surface there. They are set in a **single-stroke font** built into the
@@ -143,9 +305,6 @@ names are ordered by population where OSM records one, so a cap on **Max
 labels** keeps the places that matter rather than whichever ones sort early in
 the alphabet.
 
-Turn it off to engrave every name at its exact position and accept the
-clipping.
-
 **GeoJSON import** takes Point, LineString and Polygon features. Points are
 engraved as numbered markers on the layer they sit on, and the export includes
 `points-key.csv` tying each number back to its name, sheet, sheet coordinates,
@@ -155,7 +314,10 @@ the frame never renumbers anything — which matters when a separate survey shee
 already cites those numbers. Points outside the frame keep their number and are
 marked `off-sheet` in the CSV.
 
-## Showing dolines and other closed depressions
+</details>
+
+<details>
+<summary><strong>Showing dolines and other closed depressions</strong></summary>
 
 For karst, the thing you want to see is the closed depressions — dolines,
 shakeholes, sinks — and the default level modes are bad at it. A closed
@@ -194,7 +356,10 @@ which finds sizeable dolines but not small shakeholes. If you have LIDAR (in the
 UK, Environment Agency 1 m DTM), serve it as `{z}/{x}/{y}` terrarium tiles and
 point the custom source at it — that is where this mode really pays off.
 
-## Checking it before you cut
+</details>
+
+<details>
+<summary><strong>Checking it in plan: the Stacked tab</strong></summary>
 
 The **Stacked** tab draws the finished piece from above. Scroll to zoom and drag
 to pan around it, up to 24×: at 1:1 a 300 mm sheet is only a few hundred pixels,
@@ -232,22 +397,10 @@ Engraved lines are drawn at their real width, about a fifth of a millimetre,
 rather than as a fixed hairline, so zooming in does not turn something the
 laser would close up into an apparent hole.
 
-## Checking it in 3D
+</details>
 
-The **3D** tab builds the stack from the layers and the material thickness and
-lets you turn it around — drag to spin, scroll to zoom, or leave it spinning.
-Worth doing before you cut: it shows how much relief you will actually get,
-which is usually less than people expect. Thirteen layers of 3 mm ply is 39 mm
-of stack on a 300 mm piece, and seeing that is a better guide than any number.
-
-There is no 3D library behind it. The layers nest strictly — each sits wholly
-inside and above the one below — so with the camera above the stack, drawing
-bottom plate to top plate is exactly correct painter's order, and no depth
-buffer is needed. Within a plate the walls are drawn first and the top face over
-them, which hides the back walls for free: a back wall projects into the
-interior of its own top face, while a front wall projects clear of it.
-
-## Nesting
+<details>
+<summary><strong>Nesting onto stock</strong></summary>
 
 Give it your stock size and it packs the layers onto as few boards as possible,
 so the whole piece cuts in one job instead of one file at a time.
@@ -272,28 +425,10 @@ not fit tells you by how much. Anything too large is listed rather than silently
 dropped, so a base layer bigger than your board is a warning, not a missing
 file.
 
-## Settings worth understanding
+</details>
 
-**Min feature** drops any island smaller than roughly this square. Set it to
-about 2–3× your material thickness — anything smaller tends to char through,
-fall into the machine, or snap when you handle it.
-
-**Kerf** widens each part by half the beam width so the cut piece comes out at
-nominal size. Leave it at 0 if LightBurn is already applying kerf offset,
-otherwise you will double up.
-
-**Vertical exaggeration** is shown live. It is the ratio of the horizontal scale
-to the vertical scale: material thickness ÷ contour interval, against ground
-metres per sheet millimetre. Real terrain at 1:1 looks disappointingly flat at
-wall-art size, so 5–20× is normal. Change it by changing the contour interval or
-the material thickness.
-
-**Terrain smoothing** blurs the elevation grid before contouring. One or two
-passes removes DEM quantisation without losing real landforms. **Curve
-smoothing** rounds the resulting outlines; segments running along the sheet edge
-are deliberately held rigid so the rectangle stays square.
-
-## Assembly
+<details>
+<summary><strong>Assembly</strong></summary>
 
 Cut bottom layer first. With *engrave outline of the layer above* switched on,
 each sheet carries a faint outline showing exactly where the next piece goes —
@@ -314,7 +449,10 @@ fix rotation). *Margin* is how much material must surround a hole; raise it if
 holes are landing closer to an edge than you would like. A layer that is simply
 too small to take a hole at that margin is skipped rather than weakened.
 
-## Limits
+</details>
+
+<details>
+<summary><strong>Limits</strong></summary>
 
 - Mercator, so the piece is a Mercator rectangle. Over a wall-art extent the
   distortion is invisible; over several degrees of latitude it is not.
@@ -325,7 +463,10 @@ too small to take a hole at that margin is skipped rather than weakened.
 - Coastlines are handled implicitly: sea is below the 0 m level, so include a
   level at 0 to cut a shoreline.
 
-## Deploying
+</details>
+
+<details>
+<summary><strong>Deploying</strong></summary>
 
 Pushing to `main` publishes the site — `.github/workflows/pages.yml` deploys the
 repo to GitHub Pages:
@@ -340,11 +481,11 @@ two fight over the deployment lock and the workflow sits at
 `deployment_in_progress` until it times out. The branch is left in place but is
 no longer the source, and nothing needs to go to it.
 
-Note that the basemap and Overpass are volunteer-run services on a fair-use
-policy — fine for personal use, but don't point heavy traffic at them.
+</details>
 
 ## Attribution
 
-Elevation from AWS Terrain Tiles. Map data © OpenStreetMap contributors,
+Elevation from [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/).
+Map data © OpenStreetMap contributors,
 [ODbL](https://www.openstreetmap.org/copyright) — keep the attribution if you
 publish or sell the result.

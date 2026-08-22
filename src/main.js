@@ -41,7 +41,7 @@ const state = {
   nesting: null,
   sheetIndex: 0,
   nestIndex: 0,
-  view3d: { yaw: -0.62, tilt: 0.72, zoom: 1 },
+  view3d: { yaw: -0.62, tilt: 0.72, zoom: 1, x: 0, y: 0 },   // x/y pan the model on screen
   viewStack: { zoom: 1, x: 0, y: 0 },   // pan/zoom of the stacked preview
   view: 'map',
   abort: null,
@@ -262,31 +262,87 @@ function onAreaChanged() {
 }
 
 function updateDerived() {
-  if (!state.bbox) return;
-  const g = groundSize(state.bbox);
-  const W = num('sheetW'), H = num('sheetH');
-  $('groundOut').textContent = `${fmtDist(g.width)} × ${fmtDist(g.height)}`;
-  $('scaleOut').textContent = fmtScale(g.width * 1000 / W);
-
   const th = state.thresholds;
   const t = num('thickness');
+  const W = num('sheetW');
+  const g = state.bbox ? groundSize(state.bbox) : null;
+
+  if (g) {
+    $('groundOut').textContent = `${fmtDist(g.width)} × ${fmtDist(g.height)}`;
+    $('scaleOut').textContent = fmtScale(g.width * 1000 / W);
+  }
+
+  let interval = '—', exagg = '—';
   if (th.length >= 2) {
     const steps = th.slice(1).map((v, i) => v - th[i]);
     const lo = Math.min(...steps), hi = Math.max(...steps);
-    const even = hi - lo < 1e-6;
-    $('intervalOut').textContent = even
-      ? `${lo.toFixed(1)} m` : `${lo.toFixed(1)}–${hi.toFixed(1)} m`;
-    const mean = steps.reduce((a, b) => a + b, 0) / steps.length;
-    const horiz = g.width / W;                 // metres of ground per mm across the sheet
-    const vert = mean / t;                     // metres of altitude per mm up the stack
-    const x = horiz / vert;
-    $('exaggOut').textContent = (x < 10 ? x.toFixed(2) : x.toFixed(1)) + '×';
-  } else {
-    $('intervalOut').textContent = '—';
-    $('exaggOut').textContent = '—';
+    interval = hi - lo < 1e-6 ? `${lo.toFixed(1)} m` : `${lo.toFixed(1)}–${hi.toFixed(1)} m`;
+    if (g && t > 0) {
+      const mean = steps.reduce((a, b) => a + b, 0) / steps.length;
+      const horiz = g.width / W;               // metres of ground per mm across the sheet
+      const vert = mean / t;                   // metres of altitude per mm up the stack
+      const x = horiz / vert;
+      if (isFinite(x)) exagg = (x < 10 ? x.toFixed(2) : x.toFixed(1)) + '×';
+    }
   }
-  const n = state.sheets.length || (th.length + ($('baseFull').checked ? 1 : 0));
-  $('stackOut').textContent = n ? `${(n * t).toFixed(1)} mm (${n} sheets)` : '—';
+  $('intervalOut').textContent = interval;
+  $('exaggOut').textContent = exagg;
+
+  // Before any levels exist there is no stack to measure: the base plate on its
+  // own is not one, and "3.0 mm (1 sheets)" reads like a bug.
+  const n = state.sheets.length ||
+            (th.length ? th.length + ($('baseFull').checked ? 1 : 0) : 0);
+  const tall = n && t > 0 ? `${(n * t).toFixed(1)} mm` : '—';
+  $('stackOut').textContent = n && t > 0 ? `${tall} (${n} sheet${n > 1 ? 's' : ''})` : '—';
+
+  // The same three numbers again, beside the thickness control in the 3D view —
+  // that is where you are looking when you change it, and where the answer to
+  // "how much relief does this actually give me" is worth having in front of
+  // you rather than a panel section away.
+  $('matLayers').textContent = n ? String(n) : '—';
+  $('matStack').textContent = tall;
+  $('matExagg').textContent = exagg;
+
+  updateSummaries();
+}
+
+/* ── material ────────────────────────────────────────────────────────── */
+
+/**
+ * The stock the piece is cut from. Thickness is the number that matters — it
+ * sets how tall the stack stands, and it is drawn to scale in the 3D view — so
+ * it lives in the panel and is mirrored into the turntable, where changing it
+ * and watching the piece grow is the whole point. The material itself only
+ * chooses a colour for that preview; nothing exported depends on it.
+ */
+function materialTone() {
+  const o = $('material').selectedOptions[0];
+  return o ? { h: +o.dataset.h, s: +o.dataset.s, l: +o.dataset.l } : null;
+}
+
+const RANGE_LO = 0.5, RANGE_HI = 12;
+
+/**
+ * Put the current thickness on every control that shows it, skipping the one
+ * being typed into so the caret is left alone, then redraw what depends on it.
+ */
+function syncMaterial(source) {
+  const t = num('thickness');
+  if (source !== $('matThickness')) $('matThickness').value = $('thickness').value;
+  if (source !== $('matRange'))
+    $('matRange').value = String(Math.max(RANGE_LO, Math.min(RANGE_HI, isFinite(t) ? t : 3)));
+  if (source !== $('matPreset')) $('matPreset').value = $('material').value;
+  if (source !== $('material')) $('material').value = $('matPreset').value;
+  updateDerived();
+  if (state.view === 'three') redraw();
+}
+
+/** Write a thickness in from one of the 3D view's controls. */
+function setThickness(mm, source) {
+  if (!isFinite(mm) || mm <= 0) return;
+  $('thickness').value = String(Math.round(mm * 100) / 100);
+  syncMaterial(source);
+  syncURL();
 }
 
 /* ── elevation ───────────────────────────────────────────────────────── */
@@ -994,8 +1050,33 @@ const pixIndex = (mask, p) => {
   return y * mask.mw + x;
 };
 
+/**
+ * Everything derived from the levels, taken off the screen.
+ *
+ * Clearing the levels used to leave the last piece standing: `rebuild` bailed
+ * out before it could replace anything, so the previews, the layer count, the
+ * download buttons and the step markers all went on describing a stack there
+ * was no longer anything behind — the bar offered a ZIP of it while step 3 sat
+ * empty. What is on screen has to be what the settings say.
+ */
+function clearBuild() {
+  state.sheets = [];
+  state.masks = null;
+  state.pins = [];
+  state.overlay = null;
+  state.nesting = null;
+  for (const id of ['layersOut', 'nodesOut', 'nestOut', 'nestUseOut', 'nestCapOut', 'labelOut'])
+    $(id).textContent = '—';
+  $('nestWarn').hidden = true;
+  $('dlZip').disabled = $('dlNest').disabled = true;
+  updateDerived();
+  updateSteps();
+  redraw();
+}
+
 async function rebuild() {
-  if (!state.smoothed || !state.thresholds.length) return;
+  if (!state.smoothed) return;
+  if (!state.thresholds.length) { clearBuild(); return; }
   const W = num('sheetW'), H = num('sheetH');
   const kerf = num('kerf') || 0;
 
@@ -1528,7 +1609,7 @@ function computeNesting() {
       ? `Too big for this stock: ${res.oversize.join(', ')}. ` +
         `This board takes parts up to ${capText}` +
         (margin > 0 ? `, after the ${fmtMM(margin)} mm edge margin` : '') +
-        `. Use a larger board, drop the edge margin, or reduce the sheet size in step 2.`
+        `. Use a larger board, drop the edge margin, or reduce the sheet size under Sheet & material.`
       : `This stock leaves nothing to cut from — check the stock size and edge margin above.`;
   } else {
     warn.hidden = true;
@@ -1555,6 +1636,7 @@ function redraw() {
     sheetW: num('sheetW'), sheetH: num('sheetH'),
     stockW: num('stockW'), stockH: num('stockH'),
     thickness: num('thickness'),
+    material: materialTone(),
     sheets: state.sheets, pinRadius: num('pinDia') / 2,
   };
   const has = state.sheets.length > 0;
@@ -1564,7 +1646,10 @@ function redraw() {
   $('threeEmpty').hidden = has;
   if (!has) return;
 
-  if (state.view === 'three') render3D($('threeCanvas'), model, state.view3d);
+  if (state.view === 'three') {
+    render3D($('threeCanvas'), model, state.view3d);
+    $('threeZoom').textContent = Math.round(state.view3d.zoom * 100) + '%';
+  }
 
   if (state.view === 'stack') {
     renderStack($('stackCanvas'), model, state.viewStack);
@@ -1592,37 +1677,84 @@ function redraw() {
 /* ── 3D turntable ────────────────────────────────────────────────────── */
 
 const threeCanvas = $('threeCanvas');
-let orbit = null;
+const VIEW3D_HOME = { yaw: -0.62, tilt: 0.72, zoom: 1, x: 0, y: 0 };
+const ZOOM_LO = 0.3, ZOOM_HI = 14;
 
+/**
+ * Pan is held in screen pixels, so a piece zoomed right in can still be walked
+ * around. It is bounded rather than free: past a canvas-width of travel there is
+ * nothing to look at, and a model shoved off the edge with no scrollbar to say
+ * so looks like a bug rather than a view.
+ */
+function clampPan(v) {
+  const lim = k => k * Math.max(1, v.zoom);
+  v.x = Math.max(-lim(threeCanvas.clientWidth), Math.min(lim(threeCanvas.clientWidth), v.x));
+  v.y = Math.max(-lim(threeCanvas.clientHeight), Math.min(lim(threeCanvas.clientHeight), v.y));
+  return v;
+}
+
+// Left drag turns the model; shift, the middle button or the right button pans
+// it — the same division of labour as every 3D viewer people already use.
+const wantsPan = e => e.shiftKey || e.button === 1 || e.button === 2;
+let grab = null;
+
+threeCanvas.addEventListener('contextmenu', e => e.preventDefault());
 threeCanvas.addEventListener('pointerdown', e => {
-  orbit = { x: e.clientX, y: e.clientY, yaw: state.view3d.yaw, tilt: state.view3d.tilt };
+  grab = {
+    pan: wantsPan(e), x: e.clientX, y: e.clientY,
+    yaw: state.view3d.yaw, tilt: state.view3d.tilt,
+    vx: state.view3d.x, vy: state.view3d.y,
+  };
+  threeCanvas.classList.toggle('panning', grab.pan);
   threeCanvas.setPointerCapture(e.pointerId);
   $('spin').checked = false;
+  e.preventDefault();
 });
 threeCanvas.addEventListener('pointermove', e => {
-  if (!orbit) return;
-  state.view3d.yaw = orbit.yaw + (e.clientX - orbit.x) * 0.008;
-  state.view3d.tilt = Math.max(0.12, Math.min(Math.PI / 2,
-                        orbit.tilt + (e.clientY - orbit.y) * 0.006));
+  if (!grab) return;
+  const dx = e.clientX - grab.x, dy = e.clientY - grab.y;
+  if (grab.pan) {
+    state.view3d.x = grab.vx + dx;
+    state.view3d.y = grab.vy + dy;
+    clampPan(state.view3d);
+  } else {
+    state.view3d.yaw = grab.yaw + dx * 0.008;
+    state.view3d.tilt = Math.max(0.12, Math.min(Math.PI / 2, grab.tilt + dy * 0.006));
+  }
   redraw();
 });
-const endOrbit = e => {
-  if (!orbit) return;
-  orbit = null;
+const endGrab = e => {
+  if (!grab) return;
+  grab = null;
+  threeCanvas.classList.remove('panning');
   try { threeCanvas.releasePointerCapture(e.pointerId); } catch {}
 };
-threeCanvas.addEventListener('pointerup', endOrbit);
-threeCanvas.addEventListener('pointercancel', endOrbit);
+threeCanvas.addEventListener('pointerup', endGrab);
+threeCanvas.addEventListener('pointercancel', endGrab);
+
+// Zoom about the pointer, so whatever you are looking at is what you close in
+// on. The projection is linear in the scale and the fit does not depend on the
+// zoom, so holding a screen point fixed is just this one step on the pan.
 threeCanvas.addEventListener('wheel', e => {
   e.preventDefault();
-  state.view3d.zoom = Math.max(0.3, Math.min(6, state.view3d.zoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+  const v = state.view3d;
+  const before = v.zoom;
+  v.zoom = Math.max(ZOOM_LO, Math.min(ZOOM_HI, v.zoom * (e.deltaY > 0 ? 1 / 1.12 : 1.12)));
+  const k = v.zoom / before;
+  if (k !== 1) {
+    const r = threeCanvas.getBoundingClientRect();
+    const mx = e.clientX - r.left - threeCanvas.clientWidth / 2;
+    const my = e.clientY - r.top - threeCanvas.clientHeight / 2;
+    v.x = mx - (mx - v.x) * k;
+    v.y = my - (my - v.y) * k;
+    clampPan(v);
+  }
   redraw();
 }, { passive: false });
 
-$('resetView').addEventListener('click', () => {
-  state.view3d = { yaw: -0.62, tilt: 0.72, zoom: 1 };
-  redraw();
-});
+const resetThree = () => { state.view3d = { ...VIEW3D_HOME }; redraw(); };
+$('resetView').addEventListener('click', resetThree);
+threeCanvas.addEventListener('dblclick', resetThree);
 
 /* ── stacked preview: pan and zoom ───────────────────────────────────── */
 
@@ -1844,56 +1976,146 @@ $('dlNest').addEventListener('click', () => {
 
 /**
  * The panel is a long list of options, and only four of its sections are
- * actually a sequence. This marks those, and keeps one obvious action in front
- * of you at all times so there is never a question of what to do next.
+ * actually a sequence. Those four carry a number, a done marker and a place in
+ * the bar at the bottom, which always offers the one action that comes next;
+ * everything else is detail you can ignore until you want it.
+ *
+ * The bar is the thing people miss, so it does not sit there quietly: when a
+ * step completes, the section for the next one opens, scrolls into view and
+ * flashes, and the pips across the top of the bar show how far along you are.
  */
 const FLOW = [
-  { section: 0, done: () => !!state.bbox },
-  { section: 2, done: () => !!state.grid },
-  { section: 3, done: () => state.thresholds.length > 0 },
-  { section: 9, done: () => state.sheets.length > 0 },
+  { key: 'area',   done: () => !!state.bbox },
+  { key: 'dem',    done: () => !!state.grid },
+  { key: 'levels', done: () => state.thresholds.length > 0 },
+  { key: 'export', done: () => state.sheets.length > 0 },
 ];
 
 function nextStep() {
   if (!state.bbox)
-    return { title: 'Choose your area',
+    return { key: 'area', title: 'Choose your area',
              hint: 'Pan the map, then drag the frame over the ground you want.',
              label: 'Frame to view', run: frameToView };
   if (!state.grid)
-    return { title: 'Fetch the elevation',
-             hint: `Area is set to ${$('groundOut').textContent}. This downloads the terrain for it.`,
+    return { key: 'dem', title: 'Fetch the elevation',
+             hint: `Your area is ${$('groundOut').textContent}. This downloads the terrain under it — free, and no key needed.`,
              label: 'Fetch elevation', run: () => $('fetchDem').click() };
+  // Levels are normally generated the moment the elevation lands, so this only
+  // comes up after they have been cleared — at which point "Build the layers"
+  // was the offer, and it had nothing to build from.
+  if (!state.thresholds.length)
+    return { key: 'levels', title: 'Set the layer heights',
+             hint: 'Each layer is one sheet of material. Generate a set, or place them yourself on the histogram.',
+             label: 'Generate levels', run: () => $('genThresholds').click() };
   if (!state.sheets.length)
-    return { title: 'Build the layers',
+    return { key: 'export', title: 'Build the layers',
              hint: 'Turn the elevation into cut geometry.',
              label: 'Build layers', run: () => $('build').click() };
-  return { title: `${state.sheets.length} layers ready to cut`,
-           hint: 'Add OSM detail or your own points if you want them — or take the files now.',
+  return { key: 'export', complete: true,
+           title: `${state.sheets.length} layers ready to cut`,
+           hint: 'Check it on the 3D tab first. Add map detail or your own points if you want them — or take the files now.',
            label: 'Download ZIP', run: () => $('dlZip').click() };
 }
 
-function updateSteps() {
-  const groups = [...document.querySelectorAll('#panel .grp')];
-  let flagged = false;
-  for (const step of FLOW) {
-    const g = groups[step.section];
-    if (!g) continue;
-    let chip = g.querySelector('h2 > .chip');
-    if (!chip) {
-      chip = document.createElement('span');
-      chip.className = 'chip';
-      g.querySelector('h2').appendChild(chip);
-    }
-    if (step.done()) { g.dataset.state = 'done'; chip.textContent = 'done'; }
-    else if (!flagged) { g.dataset.state = 'next'; chip.textContent = 'do this'; flagged = true; }
-    else { g.dataset.state = ''; chip.textContent = ''; }
-  }
+// The scroll-behavior an option carries beats the one the stylesheet sets, so
+// the reduced-motion rule in the CSS cannot reach a programmatic scroll. Asked
+// here instead, live, because the preference can change while the page is open.
+const noMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
+/** Open a step's section, put it on screen and mark it, so it cannot be missed. */
+function revealStep(key) {
+  const g = document.querySelector(`.grp[data-flow="${key}"]`);
+  if (!g) return;
+  g.dataset.open = '1';
+  g.classList.remove('flash');
+  void g.offsetWidth;                    // restart the animation even on the same node
+  g.classList.add('flash');
+  g.scrollIntoView({ block: 'nearest', behavior: noMotion?.matches ? 'auto' : 'smooth' });
+}
+
+// Which step the bar was offering last time, so the panel only jumps when the
+// answer actually changes — not on every keystroke that triggers a redraw.
+let offeredStep = null;
+
+function updateSteps() {
   const n = nextStep();
+  const pips = $('nextPips');
+  if (pips.childElementCount !== FLOW.length)
+    pips.innerHTML = FLOW.map(() => '<i></i>').join('');
+
+  let flagged = false;
+  FLOW.forEach((step, i) => {
+    const g = document.querySelector(`.grp[data-flow="${step.key}"]`);
+    const pip = pips.children[i];
+    const done = step.done();
+    const current = !done && !flagged;
+    if (current) flagged = true;
+    pip.className = done ? 'on' : current ? 'now' : '';
+    if (!g) return;
+    const chip = g.querySelector('h2 > .chip');
+    if (done) { g.dataset.state = 'done'; if (chip) chip.textContent = 'done'; }
+    else if (current) { g.dataset.state = 'next'; if (chip) chip.textContent = 'do this'; }
+    else { g.dataset.state = ''; if (chip) chip.textContent = ''; }
+  });
+
+  $('nextCount').textContent = n.complete
+    ? 'Ready' : `Step ${FLOW.findIndex(f => !f.done()) + 1} of ${FLOW.length}`;
+  $('nextBar').dataset.done = n.complete ? '1' : '0';
   $('nextTitle').textContent = n.title;
   $('nextHint').textContent = n.hint;
   $('nextAction').textContent = n.label;
   $('nextAction').onclick = n.run;
+  $('nextText').onclick = () => revealStep(n.key);
+
+  // Only after the first paint: on load there is nothing to jump away from.
+  if (offeredStep !== null && offeredStep !== n.key) revealStep(n.key);
+  offeredStep = n.key;
+
+  // A dot on a tab that has something new to show, so the previews are not a
+  // set of doors you have to try.
+  const built = state.sheets.length > 0;
+  for (const tab of document.querySelectorAll('.tab'))
+    tab.classList.toggle('ready', built && tab.dataset.view !== 'map');
+
+  updateSummaries();
+}
+
+/**
+ * What each section is currently set to, shown in its header while it is
+ * collapsed. Half the panel is closed by default, and this is what keeps that
+ * from hiding anything: you can read the whole configuration off the headers
+ * without opening one.
+ */
+function updateSummaries() {
+  const set = (id, text) => { const el = $(id); if (el) el.textContent = text || ''; };
+  const t = num('thickness');
+  const mat = ($('material').selectedOptions[0]?.textContent || '').toLowerCase();
+
+  set('sumArea', state.bbox ? $('groundOut').textContent : 'not set');
+  set('sumSheet', `${fmtMM(num('sheetW'))} × ${fmtMM(num('sheetH'))} mm · ${fmtMM(t)} mm ${mat}`);
+  set('sumDem', state.grid
+    ? `${state.grid.width}×${state.grid.height} · ${Math.round(state.grid.min)}–${Math.round(state.grid.max)} m`
+    : 'not fetched');
+  set('sumLevels', state.thresholds.length ? `${state.thresholds.length} levels` : 'none yet');
+  set('sumGeom', `smoothing ${$('smoothTerrain').value}/${$('smoothCurve').value} · min ${fmtMM(num('minFeature'))} mm`);
+
+  const picked = OSM_IDS.filter(([id]) => $(id).checked).length;
+  set('sumOsm', state.features
+    ? `${Object.values(state.features).reduce((a, d) => a + d.shapes.length, 0)} shapes`
+    : picked ? `${picked} types, not fetched` : 'off');
+
+  const pts = state.geoPoints.length, lines = state.geoLines.length;
+  set('sumPoints', pts || lines ? `${pts} points${lines ? `, ${lines} lines` : ''}` : 'none');
+
+  const aids = [$('engraveNext').checked && 'glue guide', $('makeJig').checked && 'jig',
+                $('pinHoles').checked && 'pins'].filter(Boolean);
+  set('sumAssembly', aids.join(' · ') || 'none');
+
+  const boards = state.nesting?.boards.length;
+  set('sumNest', boards
+    ? `${boards} board${boards > 1 ? 's' : ''} of ${fmtMM(num('stockW'))} × ${fmtMM(num('stockH'))} mm`
+    : `${fmtMM(num('stockW'))} × ${fmtMM(num('stockH'))} mm stock`);
+  set('sumExport', state.sheets.length ? `${state.sheets.length} layers` : 'not built');
 }
 
 /* ── parameter wiring ────────────────────────────────────────────────── */
@@ -1923,7 +2145,6 @@ for (const id of ['labelSize', 'labelMax', 'labelDot', 'labelFit', 'placeMin', '
                   'markerStyle', 'markerSize', 'pointNumSize', 'pointLabelMode'])
   $(id).addEventListener('change', () => { assignFeatures(); redraw(); });
 
-$('thickness').addEventListener('change', () => { if (state.view === 'three') redraw(); });
 
 for (const id of ['sheetW', 'sheetH']) {
   $(id).addEventListener('change', () => {
@@ -1935,7 +2156,14 @@ for (const id of ['sheetW', 'sheetH']) {
     scheduleRebuild();
   });
 }
-$('thickness').addEventListener('change', updateDerived);
+// Material and thickness: one value, four controls — the panel's pair and the
+// turntable's pair. `input` rather than `change`, so dragging the slider in the
+// 3D view grows the stack under your hand instead of at the end of the gesture.
+$('thickness').addEventListener('input', () => syncMaterial($('thickness')));
+$('material').addEventListener('change', () => syncMaterial($('material')));
+$('matPreset').addEventListener('change', () => syncMaterial($('matPreset')));
+$('matThickness').addEventListener('input', () => setThickness(parseFloat($('matThickness').value), $('matThickness')));
+$('matRange').addEventListener('input', () => setThickness(parseFloat($('matRange').value), $('matRange')));
 $('lockAspect').addEventListener('change', () => { if ($('lockAspect').checked) applySheetAspect(); });
 $('nLevels').addEventListener('change', () => { generateThresholds(); scheduleRebuild(); });
 $('thrMode').addEventListener('change', () => { generateThresholds(); scheduleRebuild(); });
@@ -2012,6 +2240,7 @@ function syncControlEcho() {
   const src = $('demSource').value;
   $('demTokenRow').hidden = src !== 'mapbox';
   $('demCustomRow').hidden = src !== 'custom';
+  syncMaterial(null);
 }
 
 /**
@@ -2046,6 +2275,63 @@ async function restoreShared(p) {
   if (p.osm === '1') fetchOsm();
 }
 
+/* ── first run, and the help sheet ───────────────────────────────────── */
+
+// The turntable's material controls are the panel's, mirrored: one list of
+// materials, kept in the markup where the panel's copy lives.
+$('matPreset').innerHTML = $('material').innerHTML;
+
+// A dialog has to take the keyboard with it, or someone tabbing lands on the
+// panel behind a modal they cannot see past. Focus goes in on open, stays
+// inside while it is up, and goes back to whatever opened it on close.
+const helpModal = $('helpModal');
+const FOCUSABLE = 'a[href],button:not(:disabled),input:not(:disabled),' +
+                  'select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
+const inModal = () => [...helpModal.querySelectorAll(FOCUSABLE)].filter(el => el.offsetParent !== null);
+let helpOpener = null;
+
+function openHelp() {
+  helpOpener = document.activeElement;
+  helpModal.hidden = false;
+  (helpModal.querySelector('.btn.primary') || inModal()[0])?.focus();
+}
+function closeHelp() {
+  helpModal.hidden = true;
+  helpOpener?.focus?.();
+  helpOpener = null;
+}
+$('helpBtn').addEventListener('click', openHelp);
+helpModal.addEventListener('click', e => { if (e.target.closest('[data-close]')) closeHelp(); });
+helpModal.addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const items = inModal();
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  const here = document.activeElement;
+  if (e.shiftKey ? here === first : here === last) {
+    e.preventDefault();
+    (e.shiftKey ? last : first).focus();
+  }
+});
+window.addEventListener('keydown', e => { if (e.key === 'Escape' && !helpModal.hidden) closeHelp(); });
+
+// The next-step bar is the whole flow, and it is also the easiest thing in the
+// window to scroll past without ever reading. First-time visitors get one
+// pointer at it; after that it is never shown again.
+const SEEN_KEY = 'topo-layers.seen-flow';
+const seen = () => { try { return localStorage.getItem(SEEN_KEY) === '1'; } catch { return true; } };
+const markSeen = () => { try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* private mode */ } };
+
+function dismissTip() { $('flowTip').hidden = true; markSeen(); }
+$('flowTipGo').addEventListener('click', dismissTip);
+// Acting on the bar is as good as reading the tip.
+$('nextAction').addEventListener('click', dismissTip);
+
+// Every preview starts empty, and "fetch elevation, then build" is only useful
+// if the thing it names is to hand — so the empty state carries the button.
+for (const b of document.querySelectorAll('.empty-go'))
+  b.addEventListener('click', () => $('nextAction').click());
+
 /* ── go ──────────────────────────────────────────────────────────────── */
 
 $('fitFrame').addEventListener('click', frameToView);
@@ -2069,5 +2355,10 @@ map.whenReady(() => setTimeout(() => {
   else frameToView();
 }, 60));
 renderHist();
+syncMaterial(null);
 updateSteps();
 setStatus(shared ? 'Opening a shared link…' : 'Pick an area, then fetch elevation');
+
+// Not over a shared link: that arrives already built, on the turntable, and has
+// nothing left to walk anybody through.
+if (!shared && !seen()) setTimeout(() => { if (!seen()) $('flowTip').hidden = false; }, 1200);
