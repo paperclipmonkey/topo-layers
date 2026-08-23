@@ -1,7 +1,7 @@
 :root{
   --bg:#101216; --bg2:#171a20; --bg3:#1f232b; --bg4:#272c36;
   --line:#2b313b; --line2:#39414e;
-  --fg:#e8ebf0; --fg2:#9aa4b2; --fg3:#6d7684;
+  --fg:#e8ebf0; --fg2:#a7b1bf; --fg3:#868f9e;
   --acc:#e8913a; --acc2:#f4b872; --acc-dim:#e8913a22;
   --ok:#5bc98c; --warn:#e2b23c; --err:#e2604c;
   --r:7px; --r-lg:11px;
@@ -78,11 +78,12 @@ body.resizing{cursor:col-resize;user-select:none}
 body.resizing-v{cursor:row-resize;user-select:none}
 
 /* ── panel sections ──────────────────────────────────────── */
-.grp{border-bottom:1px solid var(--line);flex:none;position:relative;transition:background .3s}
+/* the rail is sticky, so a section scrolled to must clear it */
+.grp{border-bottom:1px solid var(--line);flex:none;position:relative;transition:background .3s;scroll-margin-top:62px}
 .grp>h2{
-  margin:0; padding:11px 13px; font-size:12.5px; font-weight:600; letter-spacing:.01em;
-  color:var(--fg2); cursor:pointer; user-select:none; display:flex; align-items:center; gap:8px;
-  transition:color .15s,background .15s;
+  margin:0; padding:11px 13px; font-size:13px; font-weight:640; letter-spacing:.01em;
+  color:var(--fg); cursor:pointer; user-select:none; display:flex; align-items:center; gap:8px;
+  white-space:nowrap; transition:color .15s,background .15s;
 }
 .grp>h2:hover{color:var(--fg);background:#1b1f26}
 .grp>h2::before{
@@ -100,14 +101,16 @@ body.resizing-v{cursor:row-resize;user-select:none}
   background:var(--bg4);color:var(--fg3);font:600 11px/1 var(--mono);
   transition:background .2s,color .2s,box-shadow .2s;
 }
-.grp[data-kind=set]>h2{color:var(--fg3);font-weight:550}
-.grp[data-kind=set]>h2:hover{color:var(--fg2)}
+.grp[data-kind=set]>h2{color:var(--fg2);font-weight:580;font-size:12.5px}
+.grp[data-kind=set]>h2:hover{color:var(--fg)}
 
 /* summary of what a collapsed section is currently set to */
 .grp>h2>.sum{
   margin-left:auto;font:11px var(--mono);color:var(--fg3);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:56%;text-align:right;
+  min-width:0;overflow:hidden;text-overflow:ellipsis;max-width:56%;text-align:right;
 }
+/* a numbered step also carries a chip, so its summary gets the smaller share */
+.grp[data-kind=step]>h2>.sum{max-width:40%}
 .grp[data-open="1"]>h2>.sum{display:none}
 .grp>h2>.sum:empty{display:none}
 
@@ -127,6 +130,50 @@ body.resizing-v{cursor:row-resize;user-select:none}
 .grp>h2>.chip:empty{display:none}
 .grp.flash{animation:flash 1.1s ease-out}
 @keyframes flash{0%{background:#2a2114}60%{background:#221c14}100%{background:transparent}}
+
+/* the four steps, as a rail across the top of the panel: which one you are on,
+   which are behind you, and a way into any of them out of order */
+#stepRail{
+  position:sticky; top:0; z-index:8; flex:none;
+  display:grid; grid-template-columns:repeat(4,1fr); gap:3px;
+  padding:8px 8px 9px; background:linear-gradient(180deg,#1b1f26,#181b22);
+  border-bottom:1px solid var(--line);
+}
+.srail{
+  display:flex; flex-direction:column; align-items:center; gap:5px;
+  padding:7px 3px 6px; border:1px solid transparent; border-radius:var(--r);
+  background:none; color:var(--fg3); font:inherit; font-size:10.5px; letter-spacing:.01em;
+  cursor:pointer; transition:background .14s,color .14s,border-color .14s;
+}
+.srail:hover{background:var(--bg3);color:var(--fg2)}
+.srail>i{
+  display:grid; place-items:center; width:22px; height:22px; border-radius:50%;
+  background:var(--bg4); color:var(--fg2); font:600 11px/1 var(--mono); font-style:normal;
+  transition:background .2s,color .2s,box-shadow .2s;
+}
+.srail>span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.srail[data-state=done]{color:var(--fg2)}
+.srail[data-state=done]>i{background:#16301f;color:var(--ok);font-size:0}
+.srail[data-state=done]>i::before{content:"✓";font-size:12px}
+.srail[data-state=next]{color:var(--acc2)}
+.srail[data-state=next]>i{background:var(--acc);color:#1a1206;box-shadow:0 0 0 3px var(--acc-dim)}
+.srail.active{background:var(--bg3);border-color:var(--line2);color:var(--fg)}
+.srail.active[data-state=next]{color:var(--acc2)}
+
+/* where the flow ends and the optional settings begin */
+.panel-div{
+  display:flex; align-items:center; gap:10px; padding:16px 13px 8px;
+  font:10px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--fg3);
+}
+.panel-div::after{content:"";flex:1;height:1px;background:var(--line)}
+
+/* a settings section a step wants you to know about */
+.jumps{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:11px;color:var(--fg3)}
+.jump{
+  background:none;border:1px dashed var(--line2);border-radius:99px;
+  color:var(--fg2);font:inherit;font-size:11px;padding:3px 10px;cursor:pointer;transition:.14s;
+}
+.jump:hover{border-style:solid;border-color:var(--acc);color:var(--acc2)}
 
 /* nested "advanced" disclosures inside a section */
 details.more{border-top:1px dashed var(--line);padding-top:9px;margin-top:1px}
@@ -172,12 +219,12 @@ label:has(.u){position:relative}
 .slider output{font:11px var(--mono);color:var(--fg)}
 
 .btn{
-  background:var(--bg3); color:var(--fg); border:1px solid var(--line);
+  background:var(--bg4); color:var(--fg); border:1px solid var(--line2);
   border-radius:var(--r); padding:7px 12px; font:inherit; cursor:pointer;
   transition:background .14s,border-color .14s,transform .06s,box-shadow .14s;
   white-space:nowrap; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:6px;
 }
-.btn:hover:not(:disabled){border-color:var(--line2);background:var(--bg4)}
+.btn:hover:not(:disabled){border-color:#4a5464;background:#30364252}
 .btn:active:not(:disabled){transform:translateY(1px)}
 .btn:disabled{opacity:.38;cursor:not-allowed}
 .btn.primary{
@@ -188,6 +235,19 @@ label:has(.u){position:relative}
 .btn.sm{padding:5px 10px;font-size:11.5px}
 .btn.lg{padding:9px 16px;font-size:13px}
 .btn.wide{width:100%}
+
+.btn.accent{background:#2d2519;border-color:#6b5027;color:var(--acc2);font-weight:620}
+.btn.accent:hover:not(:disabled){background:#3b3120;border-color:#8b6931;color:#ffd9a8}
+
+.find{display:flex;flex-direction:column;gap:4px}
+.find-row{display:flex;gap:7px}
+.find-box{position:relative;flex:1;min-width:0;display:block}
+.find-i{
+  position:absolute;left:9px;top:50%;margin-top:-8px;width:15px;height:15px;
+  color:var(--fg3);pointer-events:none;transition:color .15s;
+}
+.find-box input{margin-top:0;padding-left:30px;height:34px}
+.find-box:focus-within .find-i{color:var(--acc)}
 
 .hint{margin:0;font-size:11px;line-height:1.5;color:var(--fg3)}
 .hint.warn{color:var(--warn)}

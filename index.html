@@ -71,68 +71,45 @@
   <!-- ───────────────────────── control panel ───────────────────────── -->
   <aside id="panel">
 
+    <nav id="stepRail" aria-label="The four steps">
+      <button type="button" class="srail" data-goto="area"><i>1</i><span>Area</span></button>
+      <button type="button" class="srail" data-goto="dem"><i>2</i><span>Elevation</span></button>
+      <button type="button" class="srail" data-goto="levels"><i>3</i><span>Layers</span></button>
+      <button type="button" class="srail" data-goto="export"><i>4</i><span>Export</span></button>
+    </nav>
+
     <section class="grp" data-open="1" data-kind="step" data-flow="area">
       <h2><span class="num">1</span> Choose the area <span class="sum" id="sumArea"></span><span class="chip"></span></h2>
       <div class="body">
-        <p class="hint">Pan and zoom the map, then drag the frame or its corners over the ground you want. The frame is anchored to the ground, so it stays put as you pan.</p>
-        <div class="row">
-          <button id="searchBtn" class="btn sm">Search a place…</button>
-          <button id="fitFrame" class="btn sm">Frame to view</button>
-        </div>
-        <div class="row" id="searchRow" hidden>
-          <input type="text" id="searchInput" placeholder="e.g. Snowdon, Wales" />
-          <button id="searchGo" class="btn sm">Go</button>
+        <div class="find">
+          <label class="lbl" for="searchInput">Jump to a place</label>
+          <div class="find-row">
+            <span class="find-box">
+              <svg class="find-i" viewBox="0 0 16 16" aria-hidden="true">
+                <circle cx="6.8" cy="6.8" r="4.6" fill="none" stroke="currentColor" stroke-width="1.7"/>
+                <path d="M10.3 10.3L14 14" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+              </svg>
+              <input type="text" id="searchInput" autocomplete="off" spellcheck="false"
+                     placeholder="Snowdon, Yosemite, Mont Blanc…">
+            </span>
+            <button id="searchGo" class="btn accent">Search</button>
+          </div>
         </div>
         <div id="searchResults" class="results" hidden></div>
+        <p class="hint">Or pan and zoom the map yourself, then drag the orange frame or its corners over the ground you want. The frame is anchored to the ground, so it stays put as you pan.</p>
+        <button id="fitFrame" class="btn wide">Frame the current map view</button>
         <dl class="kv">
           <dt>Bounds</dt><dd id="bboxOut">—</dd>
           <dt>Ground size</dt><dd id="groundOut">—</dd>
           <dt>Scale</dt><dd id="scaleOut">—</dd>
         </dl>
+        <div class="jumps"><span>Also:</span>
+          <button type="button" class="jump" data-jump="sheet">Sheet &amp; material</button>
+        </div>
       </div>
     </section>
 
-    <section class="grp" data-open="1" data-kind="set">
-      <h2>Sheet &amp; material <span class="sum" id="sumSheet"></span></h2>
-      <div class="body">
-        <p class="hint">How big the finished piece is, and what you are cutting it from.</p>
-        <div class="row">
-          <label>Width <input type="number" id="sheetW" value="300" min="10" max="2000" step="1"><span class="u">mm</span></label>
-          <label>Height <input type="number" id="sheetH" value="200" min="10" max="2000" step="1"><span class="u">mm</span></label>
-        </div>
-        <label class="chk"><input type="checkbox" id="lockAspect"> Lock frame to sheet aspect ratio</label>
-        <p class="hint">Unlocked, the frame drives the sheet height. Locked, the sheet drives the frame.</p>
-        <div class="row">
-          <label>Material
-            <select id="material">
-              <option value="ply" data-h="34" data-s="34" data-l="58" selected>Birch plywood</option>
-              <option value="bass" data-h="40" data-s="30" data-l="70">Basswood</option>
-              <option value="oak" data-h="30" data-s="30" data-l="50">Oak</option>
-              <option value="walnut" data-h="22" data-s="27" data-l="33">Walnut</option>
-              <option value="mdf" data-h="27" data-s="15" data-l="47">MDF</option>
-              <option value="grey" data-h="30" data-s="5" data-l="50">Greyboard</option>
-              <option value="acrylic" data-h="204" data-s="14" data-l="68">Acrylic</option>
-              <option value="black" data-h="220" data-s="6" data-l="24">Black acrylic</option>
-            </select>
-          </label>
-          <label>Thickness
-            <input type="number" id="thickness" value="3" min="0.1" max="50" step="0.1" list="stockThicknesses"><span class="u">mm</span>
-          </label>
-        </div>
-        <datalist id="stockThicknesses">
-          <option value="2"></option><option value="3"></option><option value="4"></option>
-          <option value="5.5"></option><option value="6"></option><option value="9"></option>
-        </datalist>
-        <p class="hint">Thickness is what sets how tall the stack is, and how much relief you get. The <strong>3D</strong> tab draws it to scale — change it there and watch the piece grow or flatten. Material only changes how the preview looks.</p>
-        <dl class="kv">
-          <dt>Contour interval</dt><dd id="intervalOut">—</dd>
-          <dt>Vertical exagg.</dt><dd id="exaggOut">—</dd>
-          <dt>Stack height</dt><dd id="stackOut">—</dd>
-        </dl>
-      </div>
-    </section>
-
-    <section class="grp" data-open="1" data-kind="step" data-flow="dem">
+    <section class="grp" data-open="0" data-kind="step" data-flow="dem">
       <h2><span class="num">2</span> Fetch the elevation <span class="sum" id="sumDem"></span><span class="chip"></span></h2>
       <div class="body">
         <p class="hint">Downloads the terrain heights under the frame. Free and keyless — nothing to sign up for.</p>
@@ -177,7 +154,7 @@
       </div>
     </section>
 
-    <section class="grp" data-open="1" data-kind="step" data-flow="levels">
+    <section class="grp" data-open="0" data-kind="step" data-flow="levels">
       <h2><span class="num">3</span> Set the layer heights <span class="sum" id="sumLevels"></span><span class="chip"></span></h2>
       <div class="body">
         <div class="row">
@@ -201,7 +178,7 @@
         <div class="row histo-tools">
           <label class="chk"><input type="checkbox" id="histoLog"> Log counts</label>
           <div class="spacer"></div>
-          <button id="genThresholds" class="btn sm">Regenerate</button>
+          <button id="genThresholds" class="btn sm accent">Regenerate</button>
           <button id="histoClear" class="btn sm">Clear</button>
         </div>
         <p class="hint">Drag a marker to move a level, click open ground to add one, click a marker to remove it. <kbd>Alt</kbd> drags off the round-number snap; arrow keys nudge the selected level and <kbd>Delete</kbd> drops it. The bar below the plot and the panel edge both drag, for a bigger picking area.</p>
@@ -218,10 +195,77 @@
           <label class="lbl">Levels (metres, one per line)</label>
           <textarea id="thrList" rows="6" spellcheck="false"></textarea>
         </details>
+        <div class="jumps"><span>Also:</span>
+          <button type="button" class="jump" data-jump="geom">Cut quality</button>
+        </div>
       </div>
     </section>
 
-    <section class="grp" data-open="0" data-kind="set">
+    <section class="grp" data-open="0" data-kind="step" data-flow="export">
+      <h2><span class="num">4</span> Build &amp; download <span class="sum" id="sumExport"></span><span class="chip"></span></h2>
+      <div class="body">
+        <button id="build" class="btn wide">Rebuild layers</button>
+        <div class="row">
+          <button id="dlZip" class="btn primary wide" disabled>Download ZIP</button>
+          <button id="dlNest" class="btn wide" disabled>Nesting only</button>
+        </div>
+        <button id="copyLink" class="btn wide">Copy share link</button>
+        <p class="hint">The address bar always holds a link to the piece on screen — frame, settings and levels. Opening one fetches the terrain again and lands on the 3D turntable, turning. Your elevation token and any GeoJSON you loaded stay on your machine, so a link never carries them.</p>
+        <dl class="kv">
+          <dt>Layers</dt><dd id="layersOut">—</dd>
+          <dt>Total path nodes</dt><dd id="nodesOut">—</dd>
+        </dl>
+        <div class="jumps"><span>Also:</span>
+          <button type="button" class="jump" data-jump="osm">Map detail</button>
+          <button type="button" class="jump" data-jump="assembly">Assembly aids</button>
+          <button type="button" class="jump" data-jump="nest">Stock &amp; nesting</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="panel-div"><span>Optional settings</span></div>
+
+    <section class="grp" data-open="0" data-kind="set" data-sec="sheet">
+      <h2>Sheet &amp; material <span class="sum" id="sumSheet"></span></h2>
+      <div class="body">
+        <p class="hint">How big the finished piece is, and what you are cutting it from.</p>
+        <div class="row">
+          <label>Width <input type="number" id="sheetW" value="300" min="10" max="2000" step="1"><span class="u">mm</span></label>
+          <label>Height <input type="number" id="sheetH" value="200" min="10" max="2000" step="1"><span class="u">mm</span></label>
+        </div>
+        <label class="chk"><input type="checkbox" id="lockAspect"> Lock frame to sheet aspect ratio</label>
+        <p class="hint">Unlocked, the frame drives the sheet height. Locked, the sheet drives the frame.</p>
+        <div class="row">
+          <label>Material
+            <select id="material">
+              <option value="ply" data-h="34" data-s="34" data-l="58" selected>Birch plywood</option>
+              <option value="bass" data-h="40" data-s="30" data-l="70">Basswood</option>
+              <option value="oak" data-h="30" data-s="30" data-l="50">Oak</option>
+              <option value="walnut" data-h="22" data-s="27" data-l="33">Walnut</option>
+              <option value="mdf" data-h="27" data-s="15" data-l="47">MDF</option>
+              <option value="grey" data-h="30" data-s="5" data-l="50">Greyboard</option>
+              <option value="acrylic" data-h="204" data-s="14" data-l="68">Acrylic</option>
+              <option value="black" data-h="220" data-s="6" data-l="24">Black acrylic</option>
+            </select>
+          </label>
+          <label>Thickness
+            <input type="number" id="thickness" value="3" min="0.1" max="50" step="0.1" list="stockThicknesses"><span class="u">mm</span>
+          </label>
+        </div>
+        <datalist id="stockThicknesses">
+          <option value="2"></option><option value="3"></option><option value="4"></option>
+          <option value="5.5"></option><option value="6"></option><option value="9"></option>
+        </datalist>
+        <p class="hint">Thickness is what sets how tall the stack is, and how much relief you get. The <strong>3D</strong> tab draws it to scale — change it there and watch the piece grow or flatten. Material only changes how the preview looks.</p>
+        <dl class="kv">
+          <dt>Contour interval</dt><dd id="intervalOut">—</dd>
+          <dt>Vertical exagg.</dt><dd id="exaggOut">—</dd>
+          <dt>Stack height</dt><dd id="stackOut">—</dd>
+        </dl>
+      </div>
+    </section>
+
+    <section class="grp" data-open="0" data-kind="set" data-sec="geom">
       <h2>Cut quality <span class="sum" id="sumGeom"></span></h2>
       <div class="body">
         <p class="hint">How the raw terrain is cleaned up into shapes a laser can cut well.</p>
@@ -241,7 +285,7 @@
       </div>
     </section>
 
-    <section class="grp" data-open="0" data-kind="set">
+    <section class="grp" data-open="0" data-kind="set" data-sec="osm">
       <h2>Map detail <span class="sum" id="sumOsm"></span></h2>
       <div class="body">
         <p class="hint">Optional. Lakes, rivers, roads and place names from OpenStreetMap, engraved on the layer they fall on.</p>
@@ -297,7 +341,7 @@
       </div>
     </section>
 
-    <section class="grp" data-open="0" data-kind="set" data-step="points">
+    <section class="grp" data-open="0" data-kind="set" data-sec="points">
       <h2>Your own points <span class="sum" id="sumPoints"></span></h2>
       <div class="body">
         <p class="hint">Optional. Load a GeoJSON file — points are engraved as numbered markers on the layer they sit on, and a CSV key ships with the export so other sheets can refer to them by number.</p>
@@ -330,7 +374,7 @@
       </div>
     </section>
 
-    <section class="grp" data-open="0" data-kind="set">
+    <section class="grp" data-open="0" data-kind="set" data-sec="assembly">
       <h2>Assembly aids <span class="sum" id="sumAssembly"></span></h2>
       <div class="body">
         <p class="hint">What ships alongside the cut parts to help you glue the stack up straight.</p>
@@ -350,7 +394,7 @@
       </div>
     </section>
 
-    <section class="grp" data-open="0" data-kind="set">
+    <section class="grp" data-open="0" data-kind="set" data-sec="nest">
       <h2>Stock &amp; nesting <span class="sum" id="sumNest"></span></h2>
       <div class="body">
         <p class="hint">Packs the layers onto your stock boards so the whole piece cuts in one job.</p>
@@ -373,23 +417,6 @@
       </div>
     </section>
 
-    <section class="grp" data-open="1" data-kind="step" data-flow="export">
-      <h2><span class="num">4</span> Build &amp; download <span class="sum" id="sumExport"></span><span class="chip"></span></h2>
-      <div class="body">
-        <button id="build" class="btn wide">Rebuild layers</button>
-        <div class="row">
-          <button id="dlZip" class="btn primary wide" disabled>Download ZIP</button>
-          <button id="dlNest" class="btn wide" disabled>Nesting only</button>
-        </div>
-        <button id="copyLink" class="btn wide">Copy share link</button>
-        <p class="hint">The address bar always holds a link to the piece on screen — frame, settings and levels. Opening one fetches the terrain again and lands on the 3D turntable, turning. Your elevation token and any GeoJSON you loaded stay on your machine, so a link never carries them.</p>
-        <dl class="kv">
-          <dt>Layers</dt><dd id="layersOut">—</dd>
-          <dt>Total path nodes</dt><dd id="nodesOut">—</dd>
-        </dl>
-      </div>
-    </section>
-
     <footer class="credits">
       Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> ·
       Features &amp; basemap: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors ·
@@ -398,7 +425,7 @@
 
     <div id="nextWrap">
       <div id="flowTip" hidden>
-        <p>This bar always shows the one thing to do next. Click it four times and you have a piece ready to cut.</p>
+        <p>The rail at the top is the four steps — click any of them. This bar always shows the one to do next: click it four times and you have a piece ready to cut.</p>
         <button id="flowTipGo" class="btn sm">Got it</button>
       </div>
       <div id="nextBar">
@@ -408,7 +435,7 @@
           <strong id="nextTitle">Choose your area</strong>
           <span id="nextHint">Pan the map and drag the frame over the ground you want.</span>
         </div>
-        <button id="nextAction" class="btn primary lg">Frame to view</button>
+        <button id="nextAction" class="btn primary lg">Frame the map view</button>
       </div>
     </div>
   </aside>
