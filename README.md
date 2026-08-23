@@ -14,7 +14,7 @@ install — it all runs in your browser.
   <img src="assets/hero-3d.jpg" alt="Snowdon as thirteen stacked plywood layers, previewed in 3D" width="880">
 </a>
 
-<sub>Snowdon, 300 × 200 mm, thirteen layers of 3 mm birch ply.</sub>
+<sub>Snowdon, 300 × 206 mm, thirteen layers of 3 mm birch ply — the real thing, from the app.</sub>
 
 </div>
 
