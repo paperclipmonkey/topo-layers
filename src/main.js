@@ -65,7 +65,11 @@ const hideProgress = () => { $('progress').hidden = true; };
 document.querySelectorAll('.grp>h2').forEach(h =>
   h.addEventListener('click', () => {
     const g = h.parentElement;
-    g.dataset.open = g.dataset.open === '1' ? '0' : '1';
+    const open = g.dataset.open === '1';
+    // A step opens the way a tab does — the other three fold away, so the panel
+    // only ever shows the one you are on. Clicking the open one still folds it.
+    if (g.dataset.kind === 'step' && !open) openStep(g.dataset.flow, false);
+    else { g.dataset.open = open ? '0' : '1'; syncRail(); }
   }));
 
 /* ── map & selection frame ───────────────────────────────────────────── */
@@ -202,11 +206,6 @@ frameEl.addEventListener('pointercancel', endDrag);
 
 /* ── place search ────────────────────────────────────────────────────── */
 
-$('searchBtn').addEventListener('click', () => {
-  const row = $('searchRow');
-  row.hidden = !row.hidden;
-  if (!row.hidden) $('searchInput').focus();
-});
 $('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 $('searchGo').addEventListener('click', doSearch);
 
@@ -1994,8 +1993,8 @@ const FLOW = [
 function nextStep() {
   if (!state.bbox)
     return { key: 'area', title: 'Choose your area',
-             hint: 'Pan the map, then drag the frame over the ground you want.',
-             label: 'Frame to view', run: frameToView };
+             hint: 'Search for a place, or drag the frame over the ground you want.',
+             label: 'Frame the map view', run: frameToView };
   if (!state.grid)
     return { key: 'dem', title: 'Fetch the elevation',
              hint: `Your area is ${$('groundOut').textContent}. This downloads the terrain under it — free, and no key needed.`,
@@ -2022,20 +2021,72 @@ function nextStep() {
 // here instead, live, because the preference can change while the page is open.
 const noMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
+const scrollTo = el =>
+  el.scrollIntoView({ block: 'nearest', behavior: noMotion?.matches ? 'auto' : 'smooth' });
+
+/** Mark it, so a section that just opened cannot be missed. */
+function flash(el) {
+  el.classList.remove('flash');
+  void el.offsetWidth;                   // restart the animation even on the same node
+  el.classList.add('flash');
+}
+
+/** Put the rail's highlight on whichever step is currently unfolded. */
+function syncRail() {
+  const open = [...document.querySelectorAll('.grp[data-kind=step]')]
+    .find(g => g.dataset.open === '1');
+  for (const b of document.querySelectorAll('.srail')) {
+    const on = !!open && b.dataset.goto === open.dataset.flow;
+    b.classList.toggle('active', on);
+    if (on) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
+  }
+}
+
+/**
+ * Show one step and fold the other three. The four are a sequence, and only one
+ * of them is ever the thing to do, so the panel shows one at a time — the rail
+ * above them is what makes the other three still reachable, in any order.
+ */
+function openStep(key, scroll = true) {
+  const g = document.querySelector(`.grp[data-flow="${key}"]`);
+  if (!g) return null;
+  for (const other of document.querySelectorAll('.grp[data-kind=step]'))
+    other.dataset.open = other === g ? '1' : '0';
+  syncRail();
+  if (scroll) scrollTo(g);
+  return g;
+}
+
 /** Open a step's section, put it on screen and mark it, so it cannot be missed. */
 function revealStep(key) {
-  const g = document.querySelector(`.grp[data-flow="${key}"]`);
-  if (!g) return;
-  g.dataset.open = '1';
-  g.classList.remove('flash');
-  void g.offsetWidth;                    // restart the animation even on the same node
-  g.classList.add('flash');
-  g.scrollIntoView({ block: 'nearest', behavior: noMotion?.matches ? 'auto' : 'smooth' });
+  const g = openStep(key);
+  if (g) flash(g);
 }
+
+// The rail is a way into any step, whether or not it is the one being offered.
+for (const b of document.querySelectorAll('.srail'))
+  b.addEventListener('click', () => revealStep(b.dataset.goto));
+
+// A step points at the optional sections that belong to it, so the settings
+// below the divider are reachable from the place you thought of them.
+for (const b of document.querySelectorAll('.jump'))
+  b.addEventListener('click', () => {
+    const g = document.querySelector(`.grp[data-sec="${b.dataset.jump}"]`);
+    if (!g) return;
+    g.dataset.open = '1';
+    flash(g);
+    scrollTo(g);
+  });
 
 // Which step the bar was offering last time, so the panel only jumps when the
 // answer actually changes — not on every keystroke that triggers a redraw.
 let offeredStep = null;
+
+// The panel follows the flow — except across the frame the app draws for you on
+// load. That one counts as step one being done, and folding step one away before
+// anybody has read it hides the place search, which is the control a first visit
+// goes looking for. Set the moment that opening frame is placed.
+let flowLeads = false;
 
 function updateSteps() {
   const n = nextStep();
@@ -2051,6 +2102,8 @@ function updateSteps() {
     const current = !done && !flagged;
     if (current) flagged = true;
     pip.className = done ? 'on' : current ? 'now' : '';
+    const rail = document.querySelector(`.srail[data-goto="${step.key}"]`);
+    if (rail) rail.dataset.state = done ? 'done' : current ? 'next' : '';
     if (!g) return;
     const chip = g.querySelector('h2 > .chip');
     if (done) { g.dataset.state = 'done'; if (chip) chip.textContent = 'done'; }
@@ -2067,8 +2120,9 @@ function updateSteps() {
   $('nextAction').onclick = n.run;
   $('nextText').onclick = () => revealStep(n.key);
 
-  // Only after the first paint: on load there is nothing to jump away from.
-  if (offeredStep !== null && offeredStep !== n.key) revealStep(n.key);
+  // On the first paint, land without the jump.
+  if (offeredStep === null) openStep(n.key, false);
+  else if (offeredStep !== n.key && flowLeads) revealStep(n.key);
   offeredStep = n.key;
 
   // A dot on a tab that has something new to show, so the previews are not a
@@ -2345,14 +2399,16 @@ window.topo = { state, rebuild, buildFiles, exportMeta, map, shareURL, assignFea
 // history.replaceState never fires this, so it can only be someone arriving.
 window.addEventListener('hashchange', () => {
   const p = unpackHash(location.hash);
-  if (p) restoreShared(p).catch(e => setStatus(e.message, 'err'));
+  if (!p) return;
+  flowLeads = true;
+  restoreShared(p).catch(e => setStatus(e.message, 'err'));
 });
 
 const shared = unpackHash(location.hash);
 map.whenReady(() => setTimeout(() => {
   map.invalidateSize();
-  if (shared) restoreShared(shared).catch(e => setStatus(e.message, 'err'));
-  else frameToView();
+  if (shared) { flowLeads = true; restoreShared(shared).catch(e => setStatus(e.message, 'err')); }
+  else { frameToView(); flowLeads = true; }
 }, 60));
 renderHist();
 syncMaterial(null);

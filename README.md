@@ -40,9 +40,11 @@ a link like it, sitting in the address bar.
 
 ## Four steps
 
-The panel walks you through it. Four sections are numbered and carry a *do
-this / done* marker, and the bar at the bottom always offers the one action
-that comes next. Everything else is optional detail you can ignore.
+The panel walks you through it. A rail across the top holds the four steps —
+it shows which one you are on, ticks off the ones behind you, and takes you
+back to any of them. One step is open at a time, and the bar at the bottom
+always offers the single action that comes next. Everything below *optional
+settings* is detail you can ignore.
 
 | | Step | What happens |
 | --- | --- | --- |
