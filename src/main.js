@@ -392,6 +392,7 @@ async function fetchElevation({ levels = null, view = 'stack', land = 'levels' }
 
   setStatus('Fetching elevation…', 'busy');
   setProgress(0, 'Starting…');
+  $('demWarn').hidden = true;
   try {
     const srcKey = $('demSource').value;
     const grid = await fetchElevationGrid({
@@ -409,6 +410,7 @@ async function fetchElevation({ levels = null, view = 'stack', land = 'levels' }
     $('gridOut').textContent = `${grid.width} × ${grid.height}`;
     $('elevOut').textContent = `${Math.round(grid.min)} – ${Math.round(grid.max)} m`;
     $('tilesOut').textContent = `${grid.tiles} @ z${grid.zoom}` + (grid.missing ? ` (${grid.missing} missing)` : '');
+    reportRepairs(grid);
 
     if (levels?.length) { state.thresholds = levels; writeThresholds(); }
     else generateThresholds();
@@ -428,6 +430,26 @@ async function fetchElevation({ levels = null, view = 'stack', land = 'levels' }
   } finally {
     hideProgress();
   }
+}
+
+/**
+ * Say so when samples had to be thrown away.
+ *
+ * Some tiles carry heights that are nowhere near the ground — see the note on
+ * despiking in terrain.js. The fetch itself succeeds, so without this the only
+ * sign would be an elevation range that makes no sense and a stack of levels
+ * sitting under terrain that never reaches them.
+ */
+function reportRepairs(grid) {
+  const el = $('demWarn');
+  el.hidden = !grid.repaired;
+  if (!grid.repaired) return;
+  const pct = grid.samples ? 100 * grid.repaired / grid.samples : 0;
+  const n = grid.repaired.toLocaleString('en-GB');
+  el.textContent = `${n} tile sample${grid.repaired === 1 ? '' : 's'} ` +
+    `(${pct < 0.01 ? 'under 0.01' : pct.toFixed(2)}% of the terrain) held heights that cannot be ` +
+    `ground — a known fault in some tiles — and were patched from their surroundings. ` +
+    `The elevation range above is what is left, and it is the one the levels are spread across.`;
 }
 
 $('fetchDem').addEventListener('click', () => fetchElevation());

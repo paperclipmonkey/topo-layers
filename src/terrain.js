@@ -23,6 +23,40 @@ export const DEM_SOURCES = {
 
 const MAX_TILES = 400;
 
+// Nothing on Earth is outside this. Anything that is came out of a bad tile.
+const EARTH_MIN = -11500, EARTH_MAX = 9000;
+
+/*
+ * Encoded-elevation tiles sometimes carry heights that are nowhere near the
+ * ground. The usual cause is the provider building a zoom level by resampling
+ * the one above it: blending the *bytes* of an encoded height is not the same
+ * as blending the height, so wherever the encoding steps — a coastline, a
+ * cliff — the filter invents values that are hundreds or thousands of metres
+ * out. AWS's z15 tiles over the Pembrokeshire coast, for one, hold pixels
+ * reading -21764 m in the middle of sea at -1 m, in a band a few pixels wide.
+ *
+ * Seventy such pixels in two million are invisible in the terrain but fatal to
+ * the piece: the level spacing is laid out across the full height range, so one
+ * of them drags every level down into ground that does not exist and the model
+ * comes out blank. Nothing errors, because as far as the fetch is concerned the
+ * tiles all arrived. So they get found and patched here, before anything
+ * downstream sees a range.
+ *
+ * Real terrain is separated from these by two margins, and a spike only has to
+ * fail one of them. It can be too far from its surroundings for any landform
+ * (ABS_M, which scales with how much ground a pixel covers), or too far
+ * relative to how rough its own neighbourhood is (RATIO) — a cliff sits among
+ * other cliffs, a corrupt pixel sits in flat water. The roughest real tiles
+ * measured (Everest, El Capitan, the Grand Canyon, from z11 to z15) stay under
+ * 0.6 of the first limit and under a third of the second.
+ */
+const SPIKE_FLOOR_M = 40;    // a deviation smaller than this is never a spike
+const SPIKE_ABS_M = 600;     // ... nor is one below this and in rough company
+const SPIKE_ABS_PX = 12;     // ... where "this" grows with the ground each pixel covers
+const SPIKE_RATIO = 20;      // multiples of local roughness that count as impossible
+const SPIKE_MAX_FRAC = 0.01; // flagging more than this means we are misreading terrain
+const SPIKE_PASSES = 4;      // one spike hides its milder neighbours from the first pass
+
 /** Smallest zoom whose pixel grid is at least as dense as the sample grid. */
 function pickZoom(bbox, gridW, maxZoom) {
   const lonSpan = bbox.east - bbox.west;
@@ -95,7 +129,7 @@ export async function fetchElevationGrid({ bbox, gridW, source, token, urlTempla
   for (let ty = ty0; ty <= ty1; ty++)
     for (let tx = tx0; tx <= tx1; tx++) jobs.push([tx, ty]);
 
-  let done = 0, missing = 0;
+  let done = 0, missing = 0, impossible = 0;
   await pool(jobs, 8, async ([tx, ty]) => {
     if (signal?.aborted) return;
     const wx = ((tx % n) + n) % n;                       // wrap at the antimeridian
@@ -119,13 +153,24 @@ export async function fetchElevationGrid({ bbox, gridW, source, token, urlTempla
       let mi = (oy + y) * mw + ox, di = y * TILE * 4;
       for (let x = 0; x < TILE; x++, mi++, di += 4) {
         const r = data[di], g = data[di + 1], b = data[di + 2];
-        mosaic[mi] = src.isNoData(r, g, b) ? NaN : src.decode(r, g, b);
+        const v = src.isNoData(r, g, b) ? NaN : src.decode(r, g, b);
+        const ok = v > EARTH_MIN && v < EARTH_MAX;        // false for NaN too
+        if (!ok && !Number.isNaN(v)) impossible++;
+        mosaic[mi] = ok ? v : NaN;
       }
     }
   });
 
   if (signal?.aborted) throw new Error('Cancelled');
   if (missing === jobs.length) throw new Error('No elevation tiles could be loaded. Check the source or your connection.');
+
+  // Ground covered by one tile pixel, which is what makes a height jump
+  // between neighbours plausible or not.
+  const midLat = (bbox.north + bbox.south) / 2;
+  const gsd = 156543.03392 * Math.cos(midLat * Math.PI / 180) / Math.pow(2, z);
+  onProgress?.(1, 'Checking samples…');
+  const spikes = despike(mosaic, mw, mh, gsd);
+  const repaired = impossible + spikes;
 
   fillHoles(mosaic, mw, mh);
 
@@ -144,7 +189,8 @@ export async function fetchElevationGrid({ bbox, gridW, source, token, urlTempla
   let min = Infinity, max = -Infinity;
   for (const v of values) { if (v < min) min = v; if (v > max) max = v; }
 
-  return { values, width: gw, height: gh, min, max, zoom: z, tiles: jobs.length, missing };
+  return { values, width: gw, height: gh, min, max, zoom: z, tiles: jobs.length, missing,
+           repaired, samples: (jobs.length - missing) * TILE * TILE };
 }
 
 function bilinear(a, w, h, x, y) {
@@ -155,6 +201,81 @@ function bilinear(a, w, h, x, y) {
   const v00 = a[y0 * w + x0], v10 = a[y0 * w + x1];
   const v01 = a[y1 * w + x0], v11 = a[y1 * w + x1];
   return (v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy;
+}
+
+/**
+ * Blank out samples that cannot be ground (see the SPIKE_ constants above) so
+ * the hole filler can grow real terrain over them.
+ *
+ * @param {number} gsd metres of ground per pixel
+ * @returns {number} samples blanked
+ */
+export function despike(a, w, h, gsd) {
+  const absLimit = Math.max(SPIKE_ABS_M, SPIKE_ABS_PX * gsd);
+  const budget = Math.floor(a.length * SPIKE_MAX_FRAC);
+  const dev = new Float32Array(a.length);
+  const scratch = { mean: new Float32Array(a.length), sum: new Float64Array(a.length),
+                    cnt: new Int32Array(a.length) };
+  let dropped = 0;
+
+  for (let pass = 0; pass < SPIKE_PASSES; pass++) {
+    // How far each sample sits from the ground around it, and how far its
+    // neighbours sit from theirs. The second window is the wider of the two so
+    // that a cluster of spikes cannot fill it and pass itself off as terrain.
+    const mean = boxBlur(a, w, h, 4, scratch);
+    for (let i = 0; i < a.length; i++) dev[i] = Math.abs(a[i] - mean[i]);
+    const rough = boxBlur(dev, w, h, 6, scratch);   // overwrites mean, done with
+
+    const flagged = [];
+    for (let i = 0; i < a.length; i++) {
+      const d = dev[i];
+      if (!(d > SPIKE_FLOOR_M)) continue;                 // skips NaN as well
+      if (d > absLimit || d > SPIKE_RATIO * Math.max(rough[i], 1)) flagged.push(i);
+    }
+    // Terrain this spiky all over is terrain, not damage. Leave it alone.
+    if (!flagged.length || dropped + flagged.length > budget) break;
+    for (const i of flagged) a[i] = NaN;
+    dropped += flagged.length;
+  }
+  return dropped;
+}
+
+/**
+ * Separable box mean of radius r, ignoring NaN; NaN where a window holds none.
+ * Both passes walk the raster in row order — the column sums are carried in a
+ * single row of accumulators — which on a full 400-tile mosaic is worth more
+ * than the arithmetic it costs.
+ */
+function boxBlur(a, w, h, r, scratch) {
+  const { mean: out, sum, cnt } = scratch;
+
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let s = 0, c = 0;
+    for (let x = 0, n = Math.min(r, w - 1); x <= n; x++) {
+      const v = a[row + x]; if (v === v) { s += v; c++; }
+    }
+    for (let x = 0; x < w; x++) {
+      sum[row + x] = s; cnt[row + x] = c;
+      const drop = x - r, add = x + r + 1;
+      if (drop >= 0) { const v = a[row + drop]; if (v === v) { s -= v; c--; } }
+      if (add < w) { const v = a[row + add]; if (v === v) { s += v; c++; } }
+    }
+  }
+
+  const colS = new Float64Array(w), colC = new Int32Array(w);
+  for (let y = 0, n = Math.min(r, h - 1); y <= n; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) { colS[x] += sum[row + x]; colC[x] += cnt[row + x]; }
+  }
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    for (let x = 0; x < w; x++) out[row + x] = colC[x] ? colS[x] / colC[x] : NaN;
+    const drop = (y - r) * w, add = (y + r + 1) * w;
+    if (y - r >= 0) for (let x = 0; x < w; x++) { colS[x] -= sum[drop + x]; colC[x] -= cnt[drop + x]; }
+    if (y + r + 1 < h) for (let x = 0; x < w; x++) { colS[x] += sum[add + x]; colC[x] += cnt[add + x]; }
+  }
+  return out;
 }
 
 /** Grow valid values into NaN gaps (missing tiles, DEM voids). */
