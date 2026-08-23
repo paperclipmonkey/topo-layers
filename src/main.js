@@ -64,14 +64,10 @@ function setProgress(p, text) {
 }
 const hideProgress = () => { $('progress').hidden = true; };
 
-document.querySelectorAll('.grp>h2').forEach(h =>
+document.querySelectorAll('.grp>h3').forEach(h =>
   h.addEventListener('click', () => {
     const g = h.parentElement;
-    const open = g.dataset.open === '1';
-    // A step opens the way a tab does — the other three fold away, so the panel
-    // only ever shows the one you are on. Clicking the open one still folds it.
-    if (g.dataset.kind === 'step' && !open) openStep(g.dataset.flow, false);
-    else { g.dataset.open = open ? '0' : '1'; syncRail(); }
+    g.dataset.open = g.dataset.open === '1' ? '0' : '1';
   }));
 
 /* ── map & selection frame ───────────────────────────────────────────── */
@@ -318,7 +314,13 @@ function updateDerived() {
  */
 function materialTone() {
   const o = $('material').selectedOptions[0];
-  return o ? { h: +o.dataset.h, s: +o.dataset.s, l: +o.dataset.l } : null;
+  if (!o) return null;
+  return {
+    h: +o.dataset.h, s: +o.dataset.s, l: +o.dataset.l,
+    // How strongly the face is figured, and whether the cut edge shows plies.
+    grain: o.dataset.grain === undefined ? 0.5 : +o.dataset.grain,
+    ply: o.dataset.ply === '1',
+  };
 }
 
 const RANGE_LO = 0.5, RANGE_HI = 12;
@@ -361,7 +363,7 @@ $('demSource').addEventListener('change', () => {
  * they are used as-is instead of generating a fresh set. `view` is where to
  * land once the layers exist.
  */
-async function fetchElevation({ levels = null, view = 'stack' } = {}) {
+async function fetchElevation({ levels = null, view = 'stack', land = 'levels' } = {}) {
   if (!state.bbox) return false;
   state.abort?.abort();
   const ctrl = new AbortController();
@@ -392,6 +394,10 @@ async function fetchElevation({ levels = null, view = 'stack' } = {}) {
     await rebuild();
     switchView(view);
     updateSteps();
+    // The levels were generated for you; the point of this step is that you get
+    // to disagree with them. So the panel lands on the histogram rather than on
+    // the download button, which is where following the flow used to put it.
+    if (land) openStep(land);
     setStatus('Elevation loaded', 'ok');
     return true;
   } catch (e) {
@@ -584,7 +590,7 @@ function generateThresholds() {
 
   if (mode === 'depression') {
     state.thresholds = optimiseLevels(g.values, g.width, g.height, {
-      count, depressions: depressionsFor(g),
+      count, depressions: depressionsFor(g), min: floor, max: ceil,
       emphasis: parseInt($('emphasis').value, 10) / 100,
     });
   } else {
@@ -2023,108 +2029,110 @@ function nextStep() {
 // here instead, live, because the preference can change while the page is open.
 const noMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
-const scrollTo = el =>
-  el.scrollIntoView({ block: 'nearest', behavior: noMotion?.matches ? 'auto' : 'smooth' });
-
-/** Mark it, so a section that just opened cannot be missed. */
+/** Mark a settings card that has just been opened for you. */
 function flash(el) {
   el.classList.remove('flash');
   void el.offsetWidth;                   // restart the animation even on the same node
   el.classList.add('flash');
 }
 
-/** Put the rail's highlight on whichever step is currently unfolded. */
-function syncRail() {
-  const open = [...document.querySelectorAll('.grp[data-kind=step]')]
-    .find(g => g.dataset.open === '1');
+const ORDER = FLOW.map(f => f.key);
+let atStep = 'area';
+
+/**
+ * Show one step, and only that step.
+ *
+ * The panel was a rail bolted onto a document you still scrolled through all of,
+ * which is two ways of getting about and neither of them clear. It is a wizard
+ * now: the rail says where you are and takes you anywhere, the pane holds the
+ * step and everything that belongs to it, and the footer is the way on. Nothing
+ * else is on screen to scroll past.
+ */
+function openStep(key) {
+  if (!ORDER.includes(key)) return null;
+  atStep = key;
+  let pane = null;
+  for (const p of document.querySelectorAll('.pane')) {
+    const on = p.dataset.pane === key;
+    p.classList.toggle('on', on);
+    if (on) pane = p;
+  }
   for (const b of document.querySelectorAll('.srail')) {
-    const on = !!open && b.dataset.goto === open.dataset.flow;
+    const on = b.dataset.goto === key;
     b.classList.toggle('active', on);
     if (on) b.setAttribute('aria-current', 'step'); else b.removeAttribute('aria-current');
   }
+  $('panes').scrollTop = 0;              // a new step starts at its own beginning
+  updateFoot();
+  return pane;
 }
+
+/** Open a step and put the panel's attention on it. */
+const revealStep = key => openStep(key);
+
+for (const b of document.querySelectorAll('.srail'))
+  b.addEventListener('click', () => openStep(b.dataset.goto));
+
+const stepAt = d => openStep(ORDER[Math.max(0, Math.min(ORDER.length - 1, ORDER.indexOf(atStep) + d))]);
+$('stepBack').addEventListener('click', () => stepAt(-1));
+$('stepNext').addEventListener('click', () => stepAt(1));
 
 /**
- * Show one step and fold the other three. The four are a sequence, and only one
- * of them is ever the thing to do, so the panel shows one at a time — the rail
- * above them is what makes the other three still reachable, in any order.
+ * Where you are, whether this step is settled, and the way on. Deliberately not
+ * a do-the-next-thing button: each step's own action lives in its pane, where
+ * what it acts on is in front of you, and this only moves you between them.
  */
-function openStep(key, scroll = true) {
-  const g = document.querySelector(`.grp[data-flow="${key}"]`);
-  if (!g) return null;
-  for (const other of document.querySelectorAll('.grp[data-kind=step]'))
-    other.dataset.open = other === g ? '1' : '0';
-  syncRail();
-  if (scroll) scrollTo(g);
-  return g;
+function updateFoot() {
+  const i = ORDER.indexOf(atStep);
+  const done = FLOW[i]?.done() ?? false;
+  $('stepCount').textContent = `Step ${i + 1} of ${ORDER.length}`;
+  const st = $('stepState');
+  st.textContent = done ? STEP_DONE[atStep] : STEP_TODO[atStep];
+  st.className = 'sf-state ' + (done ? 'done' : 'todo');
+  $('stepBack').disabled = i === 0;
+  $('stepNext').disabled = i === ORDER.length - 1;
+  // Accented only once this step is settled, so it pulls you on rather than past.
+  $('stepNext').classList.toggle('primary', done && i < ORDER.length - 1);
 }
 
-/** Open a step's section, put it on screen and mark it, so it cannot be missed. */
-function revealStep(key) {
-  const g = openStep(key);
-  if (g) flash(g);
-}
+const STEP_TODO = {
+  area:   'Drag the frame over the ground you want',
+  dem:    'Nothing fetched yet',
+  levels: 'No levels yet',
+  export: 'Not built yet',
+};
+const STEP_DONE = {
+  area:   'Area set',
+  dem:    'Elevation loaded',
+  levels: 'Levels set',
+  export: 'Ready to download',
+};
 
-// The rail is a way into any step, whether or not it is the one being offered.
-for (const b of document.querySelectorAll('.srail'))
-  b.addEventListener('click', () => revealStep(b.dataset.goto));
-
-// A step points at the optional sections that belong to it, so the settings
-// below the divider are reachable from the place you thought of them.
-for (const b of document.querySelectorAll('.jump'))
-  b.addEventListener('click', () => {
-    const g = document.querySelector(`.grp[data-sec="${b.dataset.jump}"]`);
-    if (!g) return;
-    g.dataset.open = '1';
-    flash(g);
-    scrollTo(g);
-  });
-
-// Which step the bar was offering last time, so the panel only jumps when the
-// answer actually changes — not on every keystroke that triggers a redraw.
+// Which step the flow last pointed at, so the panel only moves when the answer
+// actually changes — not on every keystroke that triggers a redraw.
 let offeredStep = null;
-
-// The panel follows the flow — except across the frame the app draws for you on
-// load. That one counts as step one being done, and folding step one away before
-// anybody has read it hides the place search, which is the control a first visit
-// goes looking for. Set the moment that opening frame is placed.
-let flowLeads = false;
 
 function updateSteps() {
   const n = nextStep();
-  const pips = $('nextPips');
-  if (pips.childElementCount !== FLOW.length)
-    pips.innerHTML = FLOW.map(() => '<i></i>').join('');
 
   let flagged = false;
-  FLOW.forEach((step, i) => {
-    const g = document.querySelector(`.grp[data-flow="${step.key}"]`);
-    const pip = pips.children[i];
+  FLOW.forEach(step => {
     const done = step.done();
     const current = !done && !flagged;
     if (current) flagged = true;
-    pip.className = done ? 'on' : current ? 'now' : '';
     const rail = document.querySelector(`.srail[data-goto="${step.key}"]`);
     if (rail) rail.dataset.state = done ? 'done' : current ? 'next' : '';
-    if (!g) return;
-    const chip = g.querySelector('h2 > .chip');
-    if (done) { g.dataset.state = 'done'; if (chip) chip.textContent = 'done'; }
-    else if (current) { g.dataset.state = 'next'; if (chip) chip.textContent = 'do this'; }
-    else { g.dataset.state = ''; if (chip) chip.textContent = ''; }
   });
 
-  $('nextCount').textContent = n.complete
-    ? 'Ready' : `Step ${FLOW.findIndex(f => !f.done()) + 1} of ${FLOW.length}`;
-  $('nextBar').dataset.done = n.complete ? '1' : '0';
-  $('nextTitle').textContent = n.title;
-  $('nextHint').textContent = n.hint;
-  $('nextAction').textContent = n.label;
-  $('nextAction').onclick = n.run;
-  $('nextText').onclick = () => revealStep(n.key);
+  updateFoot();
 
-  // On the first paint, land without the jump.
-  if (offeredStep === null) openStep(n.key, false);
-  else if (offeredStep !== n.key && flowLeads) revealStep(n.key);
+  // The panel no longer walks itself forward. Fetching used to land you on step
+  // four, because the levels generate themselves the moment the elevation
+  // arrives and the flow simply pointed at the last thing not done — so the
+  // histogram, which is where a piece actually gets its character, was skipped
+  // without ever being seen. Where to go after an action is now that action's
+  // own business.
+  if (offeredStep === null) openStep(n.key);
   offeredStep = n.key;
 
   // A dot on a tab that has something new to show, so the previews are not a
@@ -2371,7 +2379,7 @@ async function restoreShared(p) {
 
   // Spin is set first: switching to the 3D view is what starts the loop.
   $('spin').checked = true;
-  const ok = await fetchElevation({ levels: parseLevels(p.levels), view: 'three' });
+  const ok = await fetchElevation({ levels: parseLevels(p.levels), view: 'three', land: 'export' });
   if (!ok) return;
 
   // Engraved detail is a second, slower round trip — let it land on a model
@@ -2419,22 +2427,11 @@ helpModal.addEventListener('keydown', e => {
 });
 window.addEventListener('keydown', e => { if (e.key === 'Escape' && !helpModal.hidden) closeHelp(); });
 
-// The next-step bar is the whole flow, and it is also the easiest thing in the
-// window to scroll past without ever reading. First-time visitors get one
-// pointer at it; after that it is never shown again.
-const SEEN_KEY = 'topo-layers.seen-flow';
-const seen = () => { try { return localStorage.getItem(SEEN_KEY) === '1'; } catch { return true; } };
-const markSeen = () => { try { localStorage.setItem(SEEN_KEY, '1'); } catch { /* private mode */ } };
-
-function dismissTip() { $('flowTip').hidden = true; markSeen(); }
-$('flowTipGo').addEventListener('click', dismissTip);
-// Acting on the bar is as good as reading the tip.
-$('nextAction').addEventListener('click', dismissTip);
-
 // Every preview starts empty, and "fetch elevation, then build" is only useful
-// if the thing it names is to hand — so the empty state carries the button.
+// if the thing it names is to hand — so the empty state carries the button, and
+// it opens the step that owns it rather than acting from nowhere.
 for (const b of document.querySelectorAll('.empty-go'))
-  b.addEventListener('click', () => $('nextAction').click());
+  b.addEventListener('click', () => { const n = nextStep(); openStep(n.key); n.run(); });
 
 /* ── go ──────────────────────────────────────────────────────────────── */
 
@@ -2449,16 +2446,14 @@ window.topo = { state, rebuild, buildFiles, exportMeta, map, shareURL, assignFea
 // history.replaceState never fires this, so it can only be someone arriving.
 window.addEventListener('hashchange', () => {
   const p = unpackHash(location.hash);
-  if (!p) return;
-  flowLeads = true;
-  restoreShared(p).catch(e => setStatus(e.message, 'err'));
+  if (p) restoreShared(p).catch(e => setStatus(e.message, 'err'));
 });
 
 const shared = unpackHash(location.hash);
 map.whenReady(() => setTimeout(() => {
   map.invalidateSize();
-  if (shared) { flowLeads = true; restoreShared(shared).catch(e => setStatus(e.message, 'err')); }
-  else { frameToView(); flowLeads = true; }
+  if (shared) restoreShared(shared).catch(e => setStatus(e.message, 'err'));
+  else frameToView();
 }, 60));
 renderHist();
 syncMaterial(null);
@@ -2467,4 +2462,4 @@ setStatus(shared ? 'Opening a shared link…' : 'Pick an area, then fetch elevat
 
 // Not over a shared link: that arrives already built, on the turntable, and has
 // nothing left to walk anybody through.
-if (!shared && !seen()) setTimeout(() => { if (!seen()) $('flowTip').hidden = false; }, 1200);
+openStep(shared ? 'export' : 'area');

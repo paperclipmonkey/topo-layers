@@ -191,7 +191,16 @@ export async function fetchOsmFeatures({ bbox, groups, sheetW, sheetH, simplifyT
       const res = await fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(body),
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal });
       if (!res.ok) { lastErr = new Error(`Overpass ${res.status}`); continue; }
-      json = await res.json();
+      const got = await res.json();
+      // A query that times out or runs out of memory still answers 200: the
+      // failure arrives as a remark beside an empty element list. Taken as data
+      // it reads as "this area has no rivers", which is a different thing
+      // entirely — and the other endpoint may not be as busy.
+      if (got.remark && !got.elements?.length) {
+        lastErr = new Error(String(got.remark).replace(/^runtime error:\s*/i, ''));
+        continue;
+      }
+      json = got;
       break;
     } catch (e) { if (signal?.aborted) throw e; lastErr = e; }
   }

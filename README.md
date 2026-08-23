@@ -40,11 +40,21 @@ a link like it, sitting in the address bar.
 
 ## Four steps
 
-The panel walks you through it. A rail across the top holds the four steps —
-it shows which one you are on, ticks off the ones behind you, and takes you
-back to any of them. One step is open at a time, and the bar at the bottom
-always offers the single action that comes next. Everything below *optional
-settings* is detail you can ignore.
+The panel is a wizard, and only ever shows one step. A rail across the top
+says which one you are on, ticks off the ones behind you, and takes you
+straight to any of them; the footer says whether this step is settled and
+moves you on when you are ready. Every setting lives inside the step it
+belongs to — the sheet size with the area, cut quality with the layer
+heights, engraving and nesting with the export — so there is no long form to
+scroll past and nothing on screen that is not this step.
+
+Each step's own action is in the step, not in the footer. Nothing hurries you
+through: what the footer offers is *next*, not *do the next thing*, and it
+only lights up once the step is settled.
+
+Every group of options carries a **?** that opens a plain-English note on what
+each one actually does — what kerf is for, how the four spacings differ, why
+min feature wants to be two or three times your material thickness.
 
 | | Step | What happens |
 | --- | --- | --- |
@@ -75,7 +85,9 @@ Set your **real material thickness** on the card in the corner and the model
 changes under your hand: every plate is drawn as one sheet of that stock, at
 true scale against the piece, with the layer count, stack height and vertical
 exaggeration reading out beside the control. The material picker — plywood, MDF,
-walnut, acrylic — changes only how the preview looks.
+walnut, acrylic — changes only how the preview looks: each stock is drawn with
+its own figure, and birch ply gets veneer laminations down its cut edges, so a
+piece in walnut reads as walnut rather than as plywood in a different colour.
 
 Worth doing every time, because it shows how much relief you actually get, and
 that is usually less than people expect: thirteen layers of 3 mm ply is 39 mm of
@@ -173,6 +185,14 @@ bottom plate to top plate is exactly correct painter's order, and no depth
 buffer is needed. Within a plate the walls are drawn first and the top face over
 them, which hides the back walls for free: a back wall projects into the
 interior of its own top face, while a front wall projects clear of it.
+
+The grain is a tile of procedural figure used as a fill pattern, and the pattern
+carries a transform of its own, because the top-face projection is affine once
+the plate's height is fixed. That is what keeps the figure lying on the board
+rather than on the screen: without it the grain swims across a piece as it
+turns. The plies down a cut edge are the plate's own outline drawn again part of
+the way up — height only moves screen y — and they stop being drawn once a plate
+is too shallow to tell one veneer from the next.
 
 The model is fitted to the circle its corners turn through rather than to
 whichever silhouette it happens to be presenting. A rectangle is wider corner-on

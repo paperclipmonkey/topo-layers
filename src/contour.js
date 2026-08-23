@@ -40,10 +40,16 @@ export function makeThresholds({ mode, count, min, max, values }) {
     return out;
   }
 
-  // quantile — equal *area* per layer
+  // quantile — equal *area* per layer, over the ground the range covers. Taking
+  // the quantiles of everything would ignore a floor and ceiling that every
+  // other rule here honours, and silently: the levels simply would not move.
   const stride = Math.max(1, Math.floor(values.length / 200000));
   const sample = [];
-  for (let i = 0; i < values.length; i += stride) sample.push(values[i]);
+  for (let i = 0; i < values.length; i += stride) {
+    const e = values[i];
+    if (e >= lo && e <= hi) sample.push(e);
+  }
+  if (!sample.length) return [];
   sample.sort((a, b) => a - b);
   const out = [];
   for (let k = 1; k <= n; k++) {

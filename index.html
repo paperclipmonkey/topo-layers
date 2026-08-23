@@ -78,9 +78,11 @@
       <button type="button" class="srail" data-goto="export"><i>4</i><span>Export</span></button>
     </nav>
 
-    <section class="grp" data-open="1" data-kind="step" data-flow="area">
-      <h2><span class="num">1</span> Choose the area <span class="sum" id="sumArea"></span><span class="chip"></span></h2>
-      <div class="body">
+    <div id="panes">
+
+      <section class="pane on" data-pane="area">
+        <h2><span class="pnum">1</span> Choose the area</h2>
+        <p class="lede">Find the ground you want and set how big the finished piece will be.</p>
         <div class="find">
           <label class="lbl" for="searchInput">Jump to a place</label>
           <div class="find-row">
@@ -103,15 +105,69 @@
           <dt>Ground size</dt><dd id="groundOut">—</dd>
           <dt>Scale</dt><dd id="scaleOut">—</dd>
         </dl>
-        <div class="jumps"><span>Also:</span>
-          <button type="button" class="jump" data-jump="sheet">Sheet &amp; material</button>
+        <details class="help">
+          <summary>How the frame works</summary>
+          <dl>
+            <dt>Dragging</dt><dd>Drag inside the frame to move it, or a corner or edge handle to resize. It is pinned to the ground, so panning and zooming the map leaves it where you put it.</dd>
+            <dt>Ground size</dt><dd>How much real land the frame covers. Bigger means more terrain but less detail per millimetre of material.</dd>
+            <dt>Scale</dt><dd>The ratio between the ground and the finished piece — 1:35,000 means one millimetre on the wood is 35 metres of hillside.</dd>
+          </dl>
+        </details>
+        <section class="grp" data-open="0" data-kind="set" data-sec="sheet">
+          <h3>Sheet &amp; material <span class="sum" id="sumSheet"></span></h3>
+          <div class="body">
+        <p class="hint">How big the finished piece is, and what you are cutting it from.</p>
+        <div class="row">
+          <label>Width <input type="number" id="sheetW" value="300" min="10" max="2000" step="1"><span class="u">mm</span></label>
+          <label>Height <input type="number" id="sheetH" value="200" min="10" max="2000" step="1"><span class="u">mm</span></label>
         </div>
-      </div>
-    </section>
+        <label class="chk"><input type="checkbox" id="lockAspect"> Lock frame to sheet aspect ratio</label>
+        <p class="hint">Unlocked, the frame drives the sheet height. Locked, the sheet drives the frame.</p>
+        <div class="row">
+          <label>Material
+            <select id="material">
+              <!-- grain: how strongly the face is figured, 0 for a material with no
+                   figure at all. ply: laminations to draw on the cut edge. -->
+              <option value="ply" data-h="34" data-s="34" data-l="58" data-grain=".5" data-ply="1" selected>Birch plywood</option>
+              <option value="bass" data-h="40" data-s="30" data-l="70" data-grain=".3">Basswood</option>
+              <option value="oak" data-h="30" data-s="30" data-l="50" data-grain="1">Oak</option>
+              <option value="walnut" data-h="22" data-s="27" data-l="33" data-grain=".85">Walnut</option>
+              <option value="mdf" data-h="27" data-s="15" data-l="47" data-grain=".12">MDF</option>
+              <option value="grey" data-h="30" data-s="5" data-l="50" data-grain=".1">Greyboard</option>
+              <option value="acrylic" data-h="204" data-s="14" data-l="68" data-grain="0">Acrylic</option>
+              <option value="black" data-h="220" data-s="6" data-l="24" data-grain="0">Black acrylic</option>
+            </select>
+          </label>
+          <label>Thickness
+            <input type="number" id="thickness" value="3" min="0.1" max="50" step="0.1" list="stockThicknesses"><span class="u">mm</span>
+          </label>
+        </div>
+        <datalist id="stockThicknesses">
+          <option value="2"></option><option value="3"></option><option value="4"></option>
+          <option value="5.5"></option><option value="6"></option><option value="9"></option>
+        </datalist>
+        <p class="hint">Thickness is what sets how tall the stack is, and how much relief you get. The <strong>3D</strong> tab draws it to scale — change it there and watch the piece grow or flatten. Material only changes how the preview looks.</p>
+        <dl class="kv">
+          <dt>Contour interval</dt><dd id="intervalOut">—</dd>
+          <dt>Vertical exagg.</dt><dd id="exaggOut">—</dd>
+          <dt>Stack height</dt><dd id="stackOut">—</dd>
+        </dl>
+        <details class="help">
+          <summary>What these change</summary>
+          <dl>
+            <dt>Width &amp; height</dt><dd>The finished piece, in millimetres. Everything exported is drawn at this size — one SVG unit is one millimetre, so the files cut at true scale with no rescaling.</dd>
+            <dt>Lock frame to sheet</dt><dd>Off, the frame you drag on the map decides the sheet’s height. On, the sheet decides the frame’s shape, so dragging the frame keeps the proportions you set.</dd>
+            <dt>Material</dt><dd>Only changes how the 3D preview looks — its colour, its grain, and whether the cut edges show plywood veneers. Nothing exported depends on it.</dd>
+            <dt>Thickness</dt><dd>The real stock you will cut. This is what sets how tall the stack stands and how much relief you get, and the 3D view draws it to scale.</dd>
+          </dl>
+        </details>
+          </div>
+        </section>
+      </section>
 
-    <section class="grp" data-open="0" data-kind="step" data-flow="dem">
-      <h2><span class="num">2</span> Fetch the elevation <span class="sum" id="sumDem"></span><span class="chip"></span></h2>
-      <div class="body">
+      <section class="pane" data-pane="dem">
+        <h2><span class="pnum">2</span> Fetch the elevation</h2>
+        <p class="lede">Download the terrain heights under your frame. Free, keyless, and nothing to sign up for.</p>
         <p class="hint">Downloads the terrain heights under the frame. Free and keyless — nothing to sign up for.</p>
         <button id="fetchDem" class="btn primary wide">Fetch elevation</button>
         <dl class="kv">
@@ -151,12 +207,18 @@
             </select>
           </div>
         </details>
-      </div>
-    </section>
+        <details class="help">
+          <summary>Detail and data source</summary>
+          <dl>
+            <dt>Detail</dt><dd>How many samples are taken across the frame. Draft is quick and good for trying an area out; fine and max take longer and download more tiles, and are worth it for the piece you actually cut.</dd>
+            <dt>Source</dt><dd>AWS Terrain Tiles needs no account and covers the world. Mapbox needs a token of your own. Custom takes any tile URL in terrarium or Mapbox RGB encoding.</dd>
+          </dl>
+        </details>
+      </section>
 
-    <section class="grp" data-open="0" data-kind="step" data-flow="levels">
-      <h2><span class="num">3</span> Set the layer heights <span class="sum" id="sumLevels"></span><span class="chip"></span></h2>
-      <div class="body">
+      <section class="pane" data-pane="levels">
+        <h2><span class="pnum">3</span> Set the layer heights</h2>
+        <p class="lede">Each level is one sheet of material. This is where the piece gets its character — take your time here.</p>
         <div class="row">
           <label>Layers <input type="number" id="nLevels" value="8" min="2" max="40" step="1"></label>
           <label>Spacing
@@ -181,7 +243,7 @@
           <button id="genThresholds" class="btn sm accent">Regenerate</button>
           <button id="histoClear" class="btn sm">Clear</button>
         </div>
-        <p class="hint">Drag a marker to move a level, click open ground to add one, click a marker to remove it. <kbd>Alt</kbd> drags off the round-number snap; arrow keys nudge the selected level and <kbd>Delete</kbd> drops it. The bar below the plot and the panel edge both drag, for a bigger picking area.</p>
+        <p class="hint">Drag a marker to move a level, click open ground to add one, click a marker to remove it.</p>
         <dl class="kv">
           <dt>Closed depressions</dt><dd id="dolineOut">—</dd>
         </dl>
@@ -195,79 +257,20 @@
           <label class="lbl">Levels (metres, one per line)</label>
           <textarea id="thrList" rows="6" spellcheck="false"></textarea>
         </details>
-        <div class="jumps"><span>Also:</span>
-          <button type="button" class="jump" data-jump="geom">Cut quality</button>
-        </div>
-      </div>
-    </section>
-
-    <section class="grp" data-open="0" data-kind="step" data-flow="export">
-      <h2><span class="num">4</span> Build &amp; download <span class="sum" id="sumExport"></span><span class="chip"></span></h2>
-      <div class="body">
-        <button id="build" class="btn wide">Rebuild layers</button>
-        <div class="row">
-          <button id="dlZip" class="btn primary wide" disabled>Download ZIP</button>
-          <button id="dlNest" class="btn wide" disabled>Nesting only</button>
-        </div>
-        <button id="copyLink" class="btn wide">Copy share link</button>
-        <p class="hint">The address bar always holds a link to the piece on screen — frame, settings and levels. Opening one fetches the terrain again and lands on the 3D turntable, turning. Your elevation token and any GeoJSON you loaded stay on your machine, so a link never carries them.</p>
-        <dl class="kv">
-          <dt>Layers</dt><dd id="layersOut">—</dd>
-          <dt>Total path nodes</dt><dd id="nodesOut">—</dd>
-        </dl>
-        <div class="jumps"><span>Also:</span>
-          <button type="button" class="jump" data-jump="osm">Map detail</button>
-          <button type="button" class="jump" data-jump="assembly">Assembly aids</button>
-          <button type="button" class="jump" data-jump="nest">Stock &amp; nesting</button>
-        </div>
-      </div>
-    </section>
-
-    <div class="panel-div"><span>Optional settings</span></div>
-
-    <section class="grp" data-open="0" data-kind="set" data-sec="sheet">
-      <h2>Sheet &amp; material <span class="sum" id="sumSheet"></span></h2>
-      <div class="body">
-        <p class="hint">How big the finished piece is, and what you are cutting it from.</p>
-        <div class="row">
-          <label>Width <input type="number" id="sheetW" value="300" min="10" max="2000" step="1"><span class="u">mm</span></label>
-          <label>Height <input type="number" id="sheetH" value="200" min="10" max="2000" step="1"><span class="u">mm</span></label>
-        </div>
-        <label class="chk"><input type="checkbox" id="lockAspect"> Lock frame to sheet aspect ratio</label>
-        <p class="hint">Unlocked, the frame drives the sheet height. Locked, the sheet drives the frame.</p>
-        <div class="row">
-          <label>Material
-            <select id="material">
-              <option value="ply" data-h="34" data-s="34" data-l="58" selected>Birch plywood</option>
-              <option value="bass" data-h="40" data-s="30" data-l="70">Basswood</option>
-              <option value="oak" data-h="30" data-s="30" data-l="50">Oak</option>
-              <option value="walnut" data-h="22" data-s="27" data-l="33">Walnut</option>
-              <option value="mdf" data-h="27" data-s="15" data-l="47">MDF</option>
-              <option value="grey" data-h="30" data-s="5" data-l="50">Greyboard</option>
-              <option value="acrylic" data-h="204" data-s="14" data-l="68">Acrylic</option>
-              <option value="black" data-h="220" data-s="6" data-l="24">Black acrylic</option>
-            </select>
-          </label>
-          <label>Thickness
-            <input type="number" id="thickness" value="3" min="0.1" max="50" step="0.1" list="stockThicknesses"><span class="u">mm</span>
-          </label>
-        </div>
-        <datalist id="stockThicknesses">
-          <option value="2"></option><option value="3"></option><option value="4"></option>
-          <option value="5.5"></option><option value="6"></option><option value="9"></option>
-        </datalist>
-        <p class="hint">Thickness is what sets how tall the stack is, and how much relief you get. The <strong>3D</strong> tab draws it to scale — change it there and watch the piece grow or flatten. Material only changes how the preview looks.</p>
-        <dl class="kv">
-          <dt>Contour interval</dt><dd id="intervalOut">—</dd>
-          <dt>Vertical exagg.</dt><dd id="exaggOut">—</dd>
-          <dt>Stack height</dt><dd id="stackOut">—</dd>
-        </dl>
-      </div>
-    </section>
-
-    <section class="grp" data-open="0" data-kind="set" data-sec="geom">
-      <h2>Cut quality <span class="sum" id="sumGeom"></span></h2>
-      <div class="body">
+        <details class="help">
+          <summary>How the four spacings differ</summary>
+          <dl>
+            <dt>Equal interval</dt><dd>The same height gain between every layer. The most faithful to the landscape, and the usual choice — a steep face gets tightly packed terraces and a flat plain gets almost none.</dd>
+            <dt>Equal area</dt><dd>Every layer covers roughly the same amount of the map. Use it when one height band swamps the piece — a big flat plain with one hill — and equal interval leaves you with one enormous plate and a few tiny ones.</dd>
+            <dt>Round numbers</dt><dd>Levels land on tidy heights: 100, 200, 300. Reads well when the piece is labelled, and matches a printed map. The number of layers follows from the range, so it may not be exactly the count you asked for.</dd>
+            <dt>Show depressions</dt><dd>Places levels so closed hollows — corries, craters, dolines — actually get a ring instead of vanishing between two layers. The emphasis slider trades the hollows off against the overall shape of the ground.</dd>
+            <dt>Doing it by hand</dt><dd>Whatever the rule picks, you can overrule it. Drag a marker to move a level, click open ground to add one, click a marker to remove it. <kbd>Alt</kbd> drags off the round-number snap; the arrow keys nudge the selected level and <kbd>Delete</kbd> drops it.</dd>
+            <dt>A bigger picking area</dt><dd>The bar below the plot drags the histogram taller, and so does the panel edge. Double-click the bar to put it back.</dd>
+          </dl>
+        </details>
+        <section class="grp" data-open="0" data-kind="set" data-sec="geom">
+          <h3>Cut quality <span class="sum" id="sumGeom"></span></h3>
+          <div class="body">
         <p class="hint">How the raw terrain is cleaned up into shapes a laser can cut well.</p>
         <label class="slider">Terrain smoothing <output id="smoothTerrainOut">1</output>
           <input type="range" id="smoothTerrain" min="0" max="8" step="1" value="1"></label>
@@ -282,12 +285,28 @@
           <label>Kerf <input type="number" id="kerf" value="0" min="0" max="1" step="0.01"><span class="u">mm</span></label>
         </div>
         <p class="hint">Min feature drops islands smaller than this — set it to 2–3× your material thickness. Kerf widens each part by half the beam width; leave it at&nbsp;0 if your laser software already applies kerf offset.</p>
-      </div>
-    </section>
+        <details class="help">
+          <summary>What each control does</summary>
+          <dl>
+            <dt>Terrain smoothing</dt><dd>Blurs the elevation data before the contours are traced. Raise it if the layers come out crinkly with the stair-steps of the source data; too much and shallow hollows flatten away before they can be found.</dd>
+            <dt>Curve smoothing</dt><dd>Rounds the traced outline itself. Makes for a nicer cut line without moving the contour much.</dd>
+            <dt>Simplify</dt><dd>Drops path nodes that sit within this distance of the line they are on. Smaller files and faster cuts; too high and outlines go visibly angular.</dd>
+            <dt>Min feature</dt><dd>Islands smaller than this are dropped. Set it to two or three times your material thickness — anything smaller is fragile, hard to glue, and likely to char away.</dd>
+            <dt>Min hole</dt><dd>The same, for holes cut inside a layer.</dd>
+            <dt>Kerf</dt><dd>The laser burns away a little material each side of the line. This widens every part by half that width so the pieces still fit. Leave it at 0 if your laser software already applies kerf offset — doing it twice makes everything oversized.</dd>
+          </dl>
+        </details>
+          </div>
+        </section>
+      </section>
 
-    <section class="grp" data-open="0" data-kind="set" data-sec="osm">
-      <h2>Map detail <span class="sum" id="sumOsm"></span></h2>
-      <div class="body">
+      <section class="pane" data-pane="export">
+        <h2><span class="pnum">4</span> Build &amp; download</h2>
+        <p class="lede">Add anything else you want engraved, then take the files.</p>
+        <div class="opt-head">Optional extras</div>
+        <section class="grp" data-open="0" data-kind="set" data-sec="osm">
+          <h3>Map detail <span class="sum" id="sumOsm"></span></h3>
+          <div class="body">
         <p class="hint">Optional. Lakes, rivers, roads and place names from OpenStreetMap, engraved on the layer they fall on.</p>
         <div class="chks">
           <label class="chk"><input type="checkbox" id="osm_water" checked> Lakes &amp; reservoirs</label>
@@ -338,12 +357,20 @@
           <dl class="kv"><dt>Names engraved</dt><dd id="labelOut">—</dd></dl>
           <p class="hint">Names are engraved on whichever layer is the visible surface there, in a single-stroke font that cuts as centre lines. Set in capitals — far more readable engraved small. A name is first moved and shrunk to try to find clear ground; only if that fails does the straddle rule apply. Split lettering is cut at the plate edge and continues on the next plate down, so the name still reads across the step. Peaks are never filtered by settlement size.</p>
         </details>
-      </div>
-    </section>
-
-    <section class="grp" data-open="0" data-kind="set" data-sec="points">
-      <h2>Your own points <span class="sum" id="sumPoints"></span></h2>
-      <div class="body">
+        <details class="help">
+          <summary>Where detail gets engraved</summary>
+          <dl>
+            <dt>Layer it sits on</dt><dd>Each river, road or name is engraved on whichever plate is the visible surface at that spot — so the detail follows the terrain up the stack.</dd>
+            <dt>Top layer only</dt><dd>Everything goes on the summit plate. Simplest to cut, but detail on lower ground disappears under the plates above.</dd>
+            <dt>Separate overlay sheet</dt><dd>All the detail on one extra sheet of its own, to sit over the finished stack or to cut from clear acrylic.</dd>
+            <dt>Names that straddle a step</dt><dd>A place name is moved and shrunk first to find clear ground. If it still crosses a plate edge, this decides what happens: split it across both plates so it still reads, leave it off, or engrave straight over the join.</dd>
+          </dl>
+        </details>
+          </div>
+        </section>
+        <section class="grp" data-open="0" data-kind="set" data-sec="points">
+          <h3>Your own points <span class="sum" id="sumPoints"></span></h3>
+          <div class="body">
         <p class="hint">Optional. Load a GeoJSON file — points are engraved as numbered markers on the layer they sit on, and a CSV key ships with the export so other sheets can refer to them by number.</p>
         <input type="file" id="geoFile" accept=".geojson,.json,application/geo+json,application/json">
         <div class="row">
@@ -371,12 +398,19 @@
           <dt>Loaded</dt><dd id="geoOut">—</dd>
         </dl>
         <button id="clearGeo" class="btn wide" disabled>Clear points</button>
-      </div>
-    </section>
-
-    <section class="grp" data-open="0" data-kind="set" data-sec="assembly">
-      <h2>Assembly aids <span class="sum" id="sumAssembly"></span></h2>
-      <div class="body">
+        <details class="help">
+          <summary>What a GeoJSON file gives you</summary>
+          <dl>
+            <dt>Points</dt><dd>Engraved as numbered markers on the layer they sit on. A CSV key ships with the export so a legend can refer to them by number.</dd>
+            <dt>Lines</dt><dd>Engraved as they are — a route, a boundary, a walk.</dd>
+            <dt>Nothing leaves your machine</dt><dd>The file is read in your browser. It is never uploaded, and a share link never carries it.</dd>
+          </dl>
+        </details>
+          </div>
+        </section>
+        <section class="grp" data-open="0" data-kind="set" data-sec="assembly">
+          <h3>Assembly aids <span class="sum" id="sumAssembly"></span></h3>
+          <div class="body">
         <p class="hint">What ships alongside the cut parts to help you glue the stack up straight.</p>
         <label class="chk"><input type="checkbox" id="baseFull" checked> Bottom layer is the full sheet rectangle</label>
         <label class="chk"><input type="checkbox" id="engraveNext" checked> Engrave outline of the layer above (glue guide)</label>
@@ -391,12 +425,20 @@
           <label>Max pins <input type="number" id="pinMax" value="10" min="2" max="24" step="1"></label>
         </div>
         <p class="hint">Holes are sited under the high ground first, deep inside the smallest layers, so one dowel carries as much of the stack as possible. Each sheet is only drilled where a hole clears its edges by the margin.</p>
-      </div>
-    </section>
-
-    <section class="grp" data-open="0" data-kind="set" data-sec="nest">
-      <h2>Stock &amp; nesting <span class="sum" id="sumNest"></span></h2>
-      <div class="body">
+        <details class="help">
+          <summary>What each aid is for</summary>
+          <dl>
+            <dt>Bottom layer is the full sheet</dt><dd>The base is cut as the whole rectangle rather than as a contour, giving the piece a square edge and something to build up from.</dd>
+            <dt>Engrave outline of the layer above</dt><dd>Each plate carries a faint line showing where the next one goes, so you can glue the stack up straight without measuring.</dd>
+            <dt>Alignment jig sheet</dt><dd>An extra sheet with every layer outline engraved on it, to drop each piece into place while the glue is wet.</dd>
+            <dt>Pin holes</dt><dd>Holes for alignment dowels, sited under the high ground first so one dowel carries as much of the stack as possible. A sheet is only drilled where the hole clears its own edges.</dd>
+          </dl>
+        </details>
+          </div>
+        </section>
+        <section class="grp" data-open="0" data-kind="set" data-sec="nest">
+          <h3>Stock &amp; nesting <span class="sum" id="sumNest"></span></h3>
+          <div class="body">
         <p class="hint">Packs the layers onto your stock boards so the whole piece cuts in one job.</p>
         <div class="row">
           <label>Stock width <input type="number" id="stockW" value="600" min="20" max="3000" step="1"><span class="u">mm</span></label>
@@ -414,29 +456,56 @@
           <dt>Material used</dt><dd id="nestUseOut">—</dd>
         </dl>
         <p class="hint warn" id="nestWarn" hidden></p>
-      </div>
-    </section>
-
-    <footer class="credits">
-      Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> ·
-      Features &amp; basemap: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors ·
-      <a href="https://github.com/paperclipmonkey/topo-layers" target="_blank" rel="noopener">Source</a>
-    </footer>
-
-    <div id="nextWrap">
-      <div id="flowTip" hidden>
-        <p>The rail at the top is the four steps — click any of them. This bar always shows the one to do next: click it four times and you have a piece ready to cut.</p>
-        <button id="flowTipGo" class="btn sm">Got it</button>
-      </div>
-      <div id="nextBar">
-        <div class="nb-pips" id="nextPips" aria-hidden="true"></div>
-        <div class="nb-text" id="nextText">
-          <span class="nb-step" id="nextCount">Step 1 of 4</span>
-          <strong id="nextTitle">Choose your area</strong>
-          <span id="nextHint">Pan the map and drag the frame over the ground you want.</span>
+        <details class="help">
+          <summary>Packing onto your boards</summary>
+          <dl>
+            <dt>Stock width &amp; height</dt><dd>The size of the sheets you are cutting from. Parts are packed onto as few of them as possible.</dd>
+            <dt>Edge margin</dt><dd>Material kept clear all round the board. At 0 the board is usable corner to corner; raise it if your bed needs clamp room.</dd>
+            <dt>Part gap</dt><dd>Space left between neighbouring parts, so one cut does not scorch the next.</dd>
+            <dt>Let parts rotate 90°</dt><dd>Lets a part be turned to fit. Almost always packs tighter — turn it off only if your material has a grain direction you want to keep.</dd>
+          </dl>
+        </details>
+          </div>
+        </section>
+        <hr class="sep">
+        <button id="build" class="btn wide">Rebuild layers</button>
+        <div class="row">
+          <button id="dlZip" class="btn primary wide" disabled>Download ZIP</button>
+          <button id="dlNest" class="btn wide" disabled>Nesting only</button>
         </div>
-        <button id="nextAction" class="btn primary lg">Frame the map view</button>
+        <button id="copyLink" class="btn wide">Copy share link</button>
+        <p class="hint">The address bar always holds a link back to the piece on screen.</p>
+        <dl class="kv">
+          <dt>Layers</dt><dd id="layersOut">—</dd>
+          <dt>Total path nodes</dt><dd id="nodesOut">—</dd>
+        </dl>
+        <details class="help">
+          <summary>What is in the ZIP</summary>
+          <dl>
+            <dt>One SVG per layer</dt><dd>Numbered bottom to top and named with its height, ready to cut one at a time.</dd>
+            <dt>All layers in register</dt><dd>Every layer on one page, aligned as they stack — for checking, not for cutting.</dd>
+            <dt>Nesting sheets</dt><dd>The same parts packed onto your stock boards, so the whole piece cuts in one job.</dd>
+            <dt>Alignment jig</dt><dd>The glue-up guide, if you asked for one.</dd>
+            <dt>manifest.json and README</dt><dd>What the piece is, what it was made from, and the data it came from.</dd>
+            <dt>The share link</dt><dd>Carries the frame, the settings and the exact levels. Opening one fetches the terrain again and lands on the 3D turntable, turning. Your elevation token and any GeoJSON you loaded stay on your machine, so a link never carries them.</dd>
+          </dl>
+        </details>
+      </section>
+
+      <footer class="credits">
+        Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a> &middot;
+        Features &amp; basemap: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &middot;
+        <a href="https://github.com/paperclipmonkey/topo-layers" target="_blank" rel="noopener">Source</a>
+      </footer>
+    </div>
+
+    <div id="stepFoot">
+      <button id="stepBack" class="btn">&larr; Back</button>
+      <div class="sf-mid">
+        <span class="sf-count" id="stepCount">Step 1 of 4</span>
+        <span class="sf-state" id="stepState"></span>
       </div>
+      <button id="stepNext" class="btn">Next &rarr;</button>
     </div>
   </aside>
 
@@ -559,7 +628,8 @@
       <li><strong>Set the layer heights.</strong> Each layer is one sheet of material. Eight is a good start; drag the markers on the histogram to place them by hand.</li>
       <li><strong>Build &amp; download.</strong> You get one SVG per layer, plus the layers nested onto your stock boards and an alignment jig — all in one ZIP.</li>
     </ol>
-    <p>Everything else in the panel is optional: engraved rivers and roads, place names, your own GeoJSON points, dowel holes.</p>
+    <p>The panel shows one step at a time. The rail across the top takes you to any of them, in any order, and the footer moves you on once a step is settled. Everything optional — engraved rivers and roads, place names, your own GeoJSON points, dowel holes — sits inside the step it belongs to.</p>
+    <p>Wherever a group of options needs explaining there is a <strong>?</strong> beside it. Open it: it says what each control actually does, in plain English.</p>
     <p class="modal-foot">Check it on the <strong>3D</strong> tab before you cut — set your real material thickness there and see how much relief you actually get. It is usually less than people expect. Drag to turn it, <kbd>shift</kbd>-drag to pan, scroll to zoom right in on a plate edge.</p>
     <div class="modal-actions">
       <a class="btn" href="https://github.com/paperclipmonkey/topo-layers#readme" target="_blank" rel="noopener">Full documentation</a>

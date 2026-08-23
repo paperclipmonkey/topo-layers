@@ -35,7 +35,93 @@ const shade = (h, s, l) =>
   `hsl(${h.toFixed(0)}, ${Math.max(0, Math.min(100, s)).toFixed(0)}%, ${Math.max(0, Math.min(100, l)).toFixed(0)}%)`;
 
 /** Plywood, unless the caller names something else. */
-const DEFAULT_MATERIAL = { h: 34, s: 34, l: 58 };
+const DEFAULT_MATERIAL = { h: 34, s: 34, l: 58, grain: 0.5, ply: true };
+
+/* ── grain ───────────────────────────────────────────────────────────────
+ *
+ * A plate is a piece of board, and a board has figure on it. Flat fills made
+ * the stack read as tinted card: the terraces were told apart only by the line
+ * between them, and nothing said what the piece would be made of.
+ *
+ * The figure is one tile of procedural grain, drawn once per material and used
+ * as a fill pattern over the flat tone — so the ambient ramp up the stack, which
+ * is what gives the terraces their depth, is left exactly as it was. The tile
+ * carries only the light and dark of the figure, in the material's own hue, so
+ * a pale birch does not pick up chalky white streaks and a walnut does not go
+ * grey.
+ *
+ * Grain runs along one axis across the whole piece, because every plate is cut
+ * from the same board and a stack whose figure changed direction plate to plate
+ * would read as a pile of offcuts.
+ */
+
+const TILE = 256;          // px in the tile — enough to stay crisp zoomed right in
+const GRAIN_MM = 90;       // millimetres of board the tile covers
+
+/**
+ * Periodic in v, so the tile repeats without a seam: every term completes a
+ * whole number of cycles across it. Rings of a tree are not sinusoidal, and the
+ * sharp term is what stops these reading as corduroy.
+ */
+function figure(u, v) {
+  const TAU = Math.PI * 2;
+  // The grain wanders across the board rather than running dead straight.
+  const drift = 0.055 * Math.sin(TAU * u) + 0.022 * Math.sin(TAU * 2 * u + 1.3);
+  const t = v + drift;
+  let g = 0.55 * Math.sin(TAU * 7 * t)
+        + 0.30 * Math.sin(TAU * 13 * t + 2.1)
+        + 0.18 * Math.sin(TAU * 23 * t + 0.7)
+        + 0.10 * Math.sin(TAU * 41 * t + 4.2);
+  // Late wood is a narrow dark line, early wood a wide pale field: squaring the
+  // dark side and easing the light one is what makes the two read differently.
+  g = g < 0 ? -Math.pow(-g / 1.13, 1.7) : Math.pow(g / 1.13, 0.85);
+  return g;
+}
+
+const tiles = new Map();
+
+/** One material's grain, as a tile of translucent light and dark. */
+function grainTile(m) {
+  const key = `${m.h}|${m.s}|${m.l}|${m.grain}`;
+  const hit = tiles.get(key);
+  if (hit) return hit;
+
+  const c = document.createElement('canvas');
+  c.width = c.height = TILE;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(TILE, TILE);
+  const d = img.data;
+
+  // Dark figure in the material's own hue, a little deeper and warmer; light
+  // figure the same hue lifted. Both are laid down as alpha, so what shows
+  // through is the plate's own tone with its ambient shading intact.
+  const dark = hsl(m.h - 3, Math.min(100, m.s * 1.15), Math.max(0, m.l * 0.52));
+  const light = hsl(m.h + 2, m.s * 0.9, Math.min(100, m.l + 22));
+  const A = 0.5 * Math.max(0, Math.min(1, m.grain));
+
+  for (let py = 0; py < TILE; py++) {
+    for (let px = 0; px < TILE; px++) {
+      const g = figure(px / TILE, py / TILE);
+      const [r, gr, b] = g < 0 ? dark : light;
+      const a = Math.min(1, Math.abs(g)) * A;
+      const i = (py * TILE + px) * 4;
+      d[i] = r; d[i + 1] = gr; d[i + 2] = b; d[i + 3] = Math.round(a * 255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  tiles.set(key, c);
+  return c;
+}
+
+/** HSL to the 0–255 RGB the pixel buffer wants. */
+function hsl(h, s, l) {
+  h = ((h % 360) + 360) % 360; s = Math.max(0, Math.min(100, s)) / 100;
+  l = Math.max(0, Math.min(100, l)) / 100;
+  const k = n => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
 
 /**
  * Real stock is one colour all the way up: every plate is a sheet of the same
@@ -67,8 +153,10 @@ function scratch(n) {
  * @param model {sheets, sheetW, sheetH, thickness, material}
  *              `thickness` is the real material thickness in millimetres, drawn
  *              to the same scale as the sheet, so the stack stands exactly as
- *              tall against the piece as the cut one will. `material` is an
- *              {h, s, l} base colour for the stock.
+ *              tall against the piece as the cut one will. `material` is the
+ *              stock: an {h, s, l} base colour, `grain` for how strongly the
+ *              face is figured (0 for a material with no figure), and `ply` for
+ *              whether the cut edge shows veneer laminations.
  * @param view  {yaw, tilt, zoom, x, y}  tilt in radians above the horizon;
  *              x/y pan the model on screen, in CSS pixels, for looking closely
  *              at a corner of a piece that no longer fits the window.
@@ -88,7 +176,9 @@ export function render3D(canvas, model, view) {
   ctx.clearRect(0, 0, cw, ch);
   if (!sheets?.length) return;
 
-  const pal = palette(model.material);
+  const mat = model.material && Number.isFinite(model.material.h)
+    ? model.material : DEFAULT_MATERIAL;
+  const pal = palette(mat);
   const yaw = view.yaw, tilt = Math.max(0.12, Math.min(Math.PI / 2, view.tilt));
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
   const ct = Math.cos(tilt), st = Math.sin(tilt);
@@ -140,6 +230,29 @@ export function render3D(canvas, model, view) {
   // walls and the top alike.
   const riseS = t * ct * s;
 
+  // The grain has to lie on the board, not on the screen, or it swims as the
+  // piece turns. The top-face projection is affine in (x, y) once the height is
+  // fixed, so it is exactly a pattern transform — one per plate, differing only
+  // in how far up the screen that plate's face sits.
+  const grain = mat.grain > 0 ? ctx.createPattern(grainTile(mat), 'repeat') : null;
+  const k2p = GRAIN_MM / TILE;                    // tile pixels -> millimetres
+  const grainAt = z => {
+    grain.setTransform(new DOMMatrix([
+      s * cy * k2p, s * sy * st * k2p,            // tile x -> screen
+      -s * sy * k2p, s * cy * st * k2p,           // tile y -> screen
+      ox, oy - z * ct * s,
+    ]));
+    return grain;
+  };
+
+  // Birch ply is a stack of thin veneers and its cut edge says so. The edge is a
+  // vertical extrusion, and height only moves screen y, so a lamination is the
+  // plate's own outline drawn again a fraction of the way up. Below a few pixels
+  // a veneer cannot be told from its neighbour, and drawing them anyway turns
+  // the whole edge into a grey band.
+  const plies = mat.ply ? Math.max(2, Math.min(9, Math.round(t / 1.4))) : 0;
+  const showPlies = plies > 1 && riseS > plies * 3;
+
   sheets.forEach((sheet, i) => {
     const zb = i * t;
     const rings = previewRings(sheet, tol);
@@ -149,6 +262,9 @@ export function render3D(canvas, model, view) {
     // lit rather than flat, at three fills per layer instead of one per quad.
     const walls = [new Path2D(), new Path2D(), new Path2D()];
     const top = new Path2D();
+    // Every veneer join on every wall that faces us, gathered into one path so
+    // the whole lamination is a single stroke rather than one per ply.
+    const seam = showPlies ? new Path2D() : null;
 
     for (const { pts, sign } of rings) {
       const n = pts.length;
@@ -175,6 +291,12 @@ export function render3D(canvas, model, view) {
         bucket.lineTo(xb, yb - riseS);
         bucket.lineTo(xa, ya - riseS);
         bucket.closePath();
+        if (seam) {
+          for (let q = 1; q < plies; q++) {
+            const dy = riseS * q / plies;
+            seam.moveTo(xa, ya - dy); seam.lineTo(xb, yb - dy);
+          }
+        }
       }
 
       top.moveTo(bufX[0], bufY[0] - riseS);
@@ -186,8 +308,19 @@ export function render3D(canvas, model, view) {
       ctx.fillStyle = pal.wall(k, d);
       ctx.fill(walls[b]);
     });
+
+    if (seam) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+      ctx.lineWidth = 0.7;
+      ctx.stroke(seam);
+    }
+
     ctx.fillStyle = pal.top(k);
     ctx.fill(top, 'evenodd');
+    if (grain) {
+      ctx.fillStyle = grainAt(zb + t);
+      ctx.fill(top, 'evenodd');
+    }
 
     // With one colour up the whole stack it is this line, not a change of
     // tone, that separates a plate from the terrace it sits on.
