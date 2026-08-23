@@ -98,7 +98,18 @@
           </div>
         </div>
         <div id="searchResults" class="results" hidden></div>
-        <p class="hint">Or pan and zoom the map yourself, then drag the orange frame or its corners over the ground you want. The frame is anchored to the ground, so it stays put as you pan.</p>
+        <div class="egs">
+          <span class="egs-lbl">Or start somewhere good</span>
+          <div class="egs-row">
+            <button type="button" class="eg" data-bb="53.030,-4.160,53.100,-3.990">Yr Wyddfa</button>
+            <button type="button" class="eg" data-bb="35.300,138.660,35.420,138.810">Mount Fuji</button>
+            <button type="button" class="eg" data-bb="36.030,-112.200,36.160,-112.010">Grand Canyon</button>
+            <button type="button" class="eg" data-bb="45.950,7.600,46.020,7.710">Matterhorn</button>
+            <button type="button" class="eg" data-bb="37.700,-119.680,37.780,-119.530">Yosemite</button>
+            <button type="button" class="eg" data-bb="36.330,25.320,36.480,25.500">Santorini</button>
+          </div>
+        </div>
+        <p class="hint">Or pan the map and drag the orange frame over the ground you want.</p>
         <button id="fitFrame" class="btn wide">Frame the current map view</button>
         <dl class="kv">
           <dt>Bounds</dt><dd id="bboxOut">—</dd>
@@ -114,7 +125,7 @@
           </dl>
         </details>
         <section class="grp" data-open="0" data-kind="set" data-sec="sheet">
-          <h3>Sheet &amp; material <span class="sum" id="sumSheet"></span></h3>
+          <h3><button type="button" class="grp-btn" aria-expanded="false">Sheet &amp; material <span class="sum" id="sumSheet"></span></button></h3>
           <div class="body">
         <p class="hint">How big the finished piece is, and what you are cutting it from.</p>
         <div class="row">
@@ -197,11 +208,11 @@
             </label>
           </div>
           <div class="row" id="demTokenRow" hidden>
-            <input type="text" id="demToken" placeholder="Mapbox access token">
+            <input type="text" id="demToken" aria-label="Mapbox access token" placeholder="Mapbox access token">
           </div>
           <div class="row" id="demCustomRow" hidden>
-            <input type="text" id="demCustomUrl" placeholder="https://…/{z}/{x}/{y}.png">
-            <select id="demCustomEnc">
+            <input type="text" id="demCustomUrl" aria-label="Custom elevation tile URL template" placeholder="https://…/{z}/{x}/{y}.png">
+            <select id="demCustomEnc" aria-label="Custom tile encoding">
               <option value="terrarium">terrarium</option>
               <option value="mapbox">mapbox rgb</option>
             </select>
@@ -255,7 +266,7 @@
             <label>Ceiling <input type="number" id="thrCeil" placeholder="auto" step="1"><span class="u">m</span></label>
           </div>
           <label class="lbl">Levels (metres, one per line)</label>
-          <textarea id="thrList" rows="6" spellcheck="false"></textarea>
+          <textarea id="thrList" aria-label="Layer heights, one per line, in metres" rows="6" spellcheck="false"></textarea>
         </details>
         <details class="help">
           <summary>How the four spacings differ</summary>
@@ -269,7 +280,7 @@
           </dl>
         </details>
         <section class="grp" data-open="0" data-kind="set" data-sec="geom">
-          <h3>Cut quality <span class="sum" id="sumGeom"></span></h3>
+          <h3><button type="button" class="grp-btn" aria-expanded="false">Cut quality <span class="sum" id="sumGeom"></span></button></h3>
           <div class="body">
         <p class="hint">How the raw terrain is cleaned up into shapes a laser can cut well.</p>
         <label class="slider">Terrain smoothing <output id="smoothTerrainOut">1</output>
@@ -305,7 +316,7 @@
         <p class="lede">Add anything else you want engraved, then take the files.</p>
         <div class="opt-head">Optional extras</div>
         <section class="grp" data-open="0" data-kind="set" data-sec="osm">
-          <h3>Map detail <span class="sum" id="sumOsm"></span></h3>
+          <h3><button type="button" class="grp-btn" aria-expanded="false">Map detail <span class="sum" id="sumOsm"></span></button></h3>
           <div class="body">
         <p class="hint">Optional. Lakes, rivers, roads and place names from OpenStreetMap, engraved on the layer they fall on.</p>
         <div class="chks">
@@ -369,10 +380,10 @@
           </div>
         </section>
         <section class="grp" data-open="0" data-kind="set" data-sec="points">
-          <h3>Your own points <span class="sum" id="sumPoints"></span></h3>
+          <h3><button type="button" class="grp-btn" aria-expanded="false">Your own points <span class="sum" id="sumPoints"></span></button></h3>
           <div class="body">
         <p class="hint">Optional. Load a GeoJSON file — points are engraved as numbered markers on the layer they sit on, and a CSV key ships with the export so other sheets can refer to them by number.</p>
-        <input type="file" id="geoFile" accept=".geojson,.json,application/geo+json,application/json">
+        <input type="file" id="geoFile" aria-label="GeoJSON file to load" accept=".geojson,.json,application/geo+json,application/json">
         <div class="row">
           <label>Marker
             <select id="markerStyle">
@@ -409,7 +420,7 @@
           </div>
         </section>
         <section class="grp" data-open="0" data-kind="set" data-sec="assembly">
-          <h3>Assembly aids <span class="sum" id="sumAssembly"></span></h3>
+          <h3><button type="button" class="grp-btn" aria-expanded="false">Assembly aids <span class="sum" id="sumAssembly"></span></button></h3>
           <div class="body">
         <p class="hint">What ships alongside the cut parts to help you glue the stack up straight.</p>
         <label class="chk"><input type="checkbox" id="baseFull" checked> Bottom layer is the full sheet rectangle</label>
@@ -437,7 +448,7 @@
           </div>
         </section>
         <section class="grp" data-open="0" data-kind="set" data-sec="nest">
-          <h3>Stock &amp; nesting <span class="sum" id="sumNest"></span></h3>
+          <h3><button type="button" class="grp-btn" aria-expanded="false">Stock &amp; nesting <span class="sum" id="sumNest"></span></button></h3>
           <div class="body">
         <p class="hint">Packs the layers onto your stock boards so the whole piece cuts in one job.</p>
         <div class="row">
@@ -547,8 +558,8 @@
         <canvas id="threeCanvas"></canvas>
         <div class="empty" id="threeEmpty">
           <div class="empty-card">
-            <h3>Nothing built yet</h3>
-            <p>Fetch the elevation for your area and the finished piece appears here, to scale, turning.</p>
+            <h3>The finished piece, in 3D</h3>
+            <p>Fetch the elevation and your stack appears here, drawn to the thickness of your real material, turning.</p>
             <button class="btn primary empty-go">Fetch elevation</button>
           </div>
         </div>
@@ -578,8 +589,8 @@
         <canvas id="stackCanvas"></canvas>
         <div class="empty" id="stackEmpty">
           <div class="empty-card">
-            <h3>Nothing built yet</h3>
-            <p>This is the finished piece seen from above — zoom in to check a name clears its terrace.</p>
+            <h3>The piece from above</h3>
+            <p>Every layer in register, seen flat on. Zoom in to check an engraved name clears its terrace.</p>
             <button class="btn primary empty-go">Fetch elevation</button>
           </div>
         </div>
@@ -594,8 +605,8 @@
         <canvas id="sheetCanvas"></canvas>
         <div class="empty" id="sheetEmpty">
           <div class="empty-card">
-            <h3>Nothing built yet</h3>
-            <p>One page per layer, exactly as it will be cut.</p>
+            <h3>One page per layer</h3>
+            <p>Each plate on its own sheet, exactly as the laser will cut it.</p>
             <button class="btn primary empty-go">Fetch elevation</button>
           </div>
         </div>
@@ -605,8 +616,8 @@
         <canvas id="nestCanvas"></canvas>
         <div class="empty" id="nestEmpty">
           <div class="empty-card">
-            <h3>Nothing built yet</h3>
-            <p>Every layer packed onto your stock boards, ready to cut in one job.</p>
+            <h3>Packed onto your boards</h3>
+            <p>Every layer nested onto your stock, so the whole piece cuts in one job.</p>
             <button class="btn primary empty-go">Fetch elevation</button>
           </div>
         </div>

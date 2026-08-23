@@ -64,10 +64,12 @@ function setProgress(p, text) {
 }
 const hideProgress = () => { $('progress').hidden = true; };
 
-document.querySelectorAll('.grp>h3').forEach(h =>
-  h.addEventListener('click', () => {
-    const g = h.parentElement;
-    g.dataset.open = g.dataset.open === '1' ? '0' : '1';
+document.querySelectorAll('.grp>h3>.grp-btn').forEach(btn =>
+  btn.addEventListener('click', () => {
+    const g = btn.closest('.grp');
+    const open = g.dataset.open !== '1';
+    g.dataset.open = open ? '1' : '0';
+    btn.setAttribute('aria-expanded', String(open));
   }));
 
 /* ── map & selection frame ───────────────────────────────────────────── */
@@ -203,6 +205,25 @@ frameEl.addEventListener('pointerup', endDrag);
 frameEl.addEventListener('pointercancel', endDrag);
 
 /* ── place search ────────────────────────────────────────────────────── */
+
+/** Put the frame on a named bbox and bring the map to it. */
+function goToArea(bb) {
+  state.bbox = bb;
+  map.fitBounds([[bb.south, bb.west], [bb.north, bb.east]], { padding: [40, 40], animate: false });
+  drawFrame();
+  onAreaChanged();
+  syncURL();
+}
+
+// Somewhere good to start. A first visit otherwise lands on a map and a form,
+// with nothing to show for itself until you have gone and found some terrain.
+for (const b of document.querySelectorAll('.eg'))
+  b.addEventListener('click', () => {
+    const [south, west, north, east] = b.dataset.bb.split(',').map(Number);
+    goToArea({ south, west, north, east });
+    $('searchResults').hidden = true;
+    setStatus(`${b.textContent} — fetch the elevation when you are ready`, 'ok');
+  });
 
 $('searchInput').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 $('searchGo').addEventListener('click', doSearch);
