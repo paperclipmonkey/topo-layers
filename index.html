@@ -238,14 +238,16 @@
         <div class="row">
           <label>Material
             <select id="material">
-              <option value="ply" data-h="34" data-s="34" data-l="58" selected>Birch plywood</option>
-              <option value="bass" data-h="40" data-s="30" data-l="70">Basswood</option>
-              <option value="oak" data-h="30" data-s="30" data-l="50">Oak</option>
-              <option value="walnut" data-h="22" data-s="27" data-l="33">Walnut</option>
-              <option value="mdf" data-h="27" data-s="15" data-l="47">MDF</option>
-              <option value="grey" data-h="30" data-s="5" data-l="50">Greyboard</option>
-              <option value="acrylic" data-h="204" data-s="14" data-l="68">Acrylic</option>
-              <option value="black" data-h="220" data-s="6" data-l="24">Black acrylic</option>
+              <!-- grain: how strongly the face is figured, 0 for a material with no
+                   figure at all. ply: laminations to draw on the cut edge. -->
+              <option value="ply" data-h="34" data-s="34" data-l="58" data-grain=".5" data-ply="1" selected>Birch plywood</option>
+              <option value="bass" data-h="40" data-s="30" data-l="70" data-grain=".3">Basswood</option>
+              <option value="oak" data-h="30" data-s="30" data-l="50" data-grain="1">Oak</option>
+              <option value="walnut" data-h="22" data-s="27" data-l="33" data-grain=".85">Walnut</option>
+              <option value="mdf" data-h="27" data-s="15" data-l="47" data-grain=".12">MDF</option>
+              <option value="grey" data-h="30" data-s="5" data-l="50" data-grain=".1">Greyboard</option>
+              <option value="acrylic" data-h="204" data-s="14" data-l="68" data-grain="0">Acrylic</option>
+              <option value="black" data-h="220" data-s="6" data-l="24" data-grain="0">Black acrylic</option>
             </select>
           </label>
           <label>Thickness

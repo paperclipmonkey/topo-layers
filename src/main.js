@@ -318,7 +318,13 @@ function updateDerived() {
  */
 function materialTone() {
   const o = $('material').selectedOptions[0];
-  return o ? { h: +o.dataset.h, s: +o.dataset.s, l: +o.dataset.l } : null;
+  if (!o) return null;
+  return {
+    h: +o.dataset.h, s: +o.dataset.s, l: +o.dataset.l,
+    // How strongly the face is figured, and whether the cut edge shows plies.
+    grain: o.dataset.grain === undefined ? 0.5 : +o.dataset.grain,
+    ply: o.dataset.ply === '1',
+  };
 }
 
 const RANGE_LO = 0.5, RANGE_HI = 12;
@@ -584,7 +590,7 @@ function generateThresholds() {
 
   if (mode === 'depression') {
     state.thresholds = optimiseLevels(g.values, g.width, g.height, {
-      count, depressions: depressionsFor(g),
+      count, depressions: depressionsFor(g), min: floor, max: ceil,
       emphasis: parseInt($('emphasis').value, 10) / 100,
     });
   } else {

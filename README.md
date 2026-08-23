@@ -75,7 +75,9 @@ Set your **real material thickness** on the card in the corner and the model
 changes under your hand: every plate is drawn as one sheet of that stock, at
 true scale against the piece, with the layer count, stack height and vertical
 exaggeration reading out beside the control. The material picker — plywood, MDF,
-walnut, acrylic — changes only how the preview looks.
+walnut, acrylic — changes only how the preview looks: each stock is drawn with
+its own figure, and birch ply gets veneer laminations down its cut edges, so a
+piece in walnut reads as walnut rather than as plywood in a different colour.
 
 Worth doing every time, because it shows how much relief you actually get, and
 that is usually less than people expect: thirteen layers of 3 mm ply is 39 mm of
@@ -173,6 +175,14 @@ bottom plate to top plate is exactly correct painter's order, and no depth
 buffer is needed. Within a plate the walls are drawn first and the top face over
 them, which hides the back walls for free: a back wall projects into the
 interior of its own top face, while a front wall projects clear of it.
+
+The grain is a tile of procedural figure used as a fill pattern, and the pattern
+carries a transform of its own, because the top-face projection is affine once
+the plate's height is fixed. That is what keeps the figure lying on the board
+rather than on the screen: without it the grain swims across a piece as it
+turns. The plies down a cut edge are the plate's own outline drawn again part of
+the way up — height only moves screen y — and they stop being drawn once a plate
+is too shallow to tell one veneer from the next.
 
 The model is fitted to the circle its corners turn through rather than to
 whichever silhouette it happens to be presenting. A rectangle is wider corner-on

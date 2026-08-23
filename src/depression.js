@@ -147,9 +147,15 @@ export function countRendered(depressions, thresholds) {
  * big sink cannot hoard the budget.
  */
 export function optimiseLevels(v, w, h, { count, depressions, ringsPerDoline = 3,
-                                          emphasis = 0.5, terrainWeight = 0.35 } = {}) {
+                                          emphasis = 0.5, terrainWeight = 0.35,
+                                          min, max } = {}) {
   let lo = Infinity, hi = -Infinity;
   for (const e of v) { if (e < lo) lo = e; if (e > hi) hi = e; }
+  // A floor and ceiling typed by hand bound where levels may fall, the same as
+  // they do for every other spacing rule. A doline outside them goes unshown,
+  // which is what asking for a narrower range means.
+  if (Number.isFinite(min)) lo = min;
+  if (Number.isFinite(max)) hi = max;
   if (!(hi > lo) || count < 1) return [];
 
   const dep = depressions || findDepressions(v, w, h);
@@ -157,9 +163,12 @@ export function optimiseLevels(v, w, h, { count, depressions, ringsPerDoline = 3
   const step = (hi - lo) / STEPS;
   const cand = Array.from({ length: STEPS - 1 }, (_, i) => lo + step * (i + 1));
 
-  // how much ground sits near each candidate height
+  // How much ground sits near each candidate height. Ground outside the range is
+  // not this piece's, and clamping it into the end bins instead would pile a
+  // whole mountainside onto the two candidates at the limits.
   const hist = new Float64Array(STEPS);
   for (const e of v) {
+    if (e < lo || e > hi) continue;
     let b = Math.floor((e - lo) / (hi - lo) * STEPS);
     if (b < 0) b = 0; if (b >= STEPS) b = STEPS - 1;
     hist[b]++;
