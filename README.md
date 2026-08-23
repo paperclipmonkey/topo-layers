@@ -40,11 +40,21 @@ a link like it, sitting in the address bar.
 
 ## Four steps
 
-The panel walks you through it. A rail across the top holds the four steps —
-it shows which one you are on, ticks off the ones behind you, and takes you
-back to any of them. One step is open at a time, and the bar at the bottom
-always offers the single action that comes next. Everything below *optional
-settings* is detail you can ignore.
+The panel is a wizard, and only ever shows one step. A rail across the top
+says which one you are on, ticks off the ones behind you, and takes you
+straight to any of them; the footer says whether this step is settled and
+moves you on when you are ready. Every setting lives inside the step it
+belongs to — the sheet size with the area, cut quality with the layer
+heights, engraving and nesting with the export — so there is no long form to
+scroll past and nothing on screen that is not this step.
+
+Each step's own action is in the step, not in the footer. Nothing hurries you
+through: what the footer offers is *next*, not *do the next thing*, and it
+only lights up once the step is settled.
+
+Every group of options carries a **?** that opens a plain-English note on what
+each one actually does — what kerf is for, how the four spacings differ, why
+min feature wants to be two or three times your material thickness.
 
 | | Step | What happens |
 | --- | --- | --- |
