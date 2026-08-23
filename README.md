@@ -218,7 +218,9 @@ ways, and it carries almost no terrain height. So heights come from
 [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/), an open,
 keyless dataset of terrarium-encoded PNGs (SRTM globally, EU-DEM over Europe,
 plus national datasets where they exist). Zoom 15 is the maximum, which is
-roughly 5 m per sample at UK latitudes.
+roughly 5 m per sample at UK latitudes — beyond the resolution of the source
+data in most places, so the top zoom or two is the provider upsampling, which
+is where the bad samples described below come from.
 
 **Everything else** is OSM: the basemap, place search (Nominatim), and the
 vector features — lakes, rivers, roads, railways, buildings, woodland — fetched
@@ -241,8 +243,16 @@ for personal use, but don't point heavy traffic at them.
 <summary><strong>How a layer is made</strong></summary>
 
 1. **Elevation.** Terrain tiles covering the frame are fetched, decoded
-   (`h = R·256 + G + B/256 − 32768`), mosaicked and resampled to a grid whose
-   cells are square in Mercator.
+   (`h = R·256 + G + B/256 − 32768`), mosaicked, checked for bad samples and
+   resampled to a grid whose cells are square in Mercator. The check matters
+   more than it sounds: a few tiles carry samples that are nowhere near the
+   ground — the provider builds some zoom levels by resampling the one above,
+   and blending the *bytes* of an encoded height across a coastline invents
+   values thousands of metres out. Seventy such samples in two million are
+   invisible in the terrain and fatal to the piece, because the levels get
+   spread across a height range nothing is in and the model comes out blank.
+   Samples too far from their surroundings for any landform are dropped and
+   filled from the ground around them, and step 2 says how many that was.
 2. **Levels.** Pick how many layers and where they sit: equal interval, equal
    area (quantile), or snapped to round contour intervals. Or type exact
    heights, or work directly on the elevation histogram: drag a marker to move a
