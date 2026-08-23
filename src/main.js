@@ -17,6 +17,8 @@ import { controlValues, applyControlValues, changedFrom,
 
 const $ = id => document.getElementById(id);
 const num = id => parseFloat($(id).value);
+/** A floor that holds against NaN, which `Math.max` does not: max(1, NaN) is NaN. */
+const atLeast = (min, v) => (Number.isFinite(v) && v > min ? v : min);
 /** Millimetres for reading: whole numbers stay whole, halves keep their decimal. */
 const fmtMM = v => (Math.round(v * 10) / 10).toString();
 
@@ -423,8 +425,8 @@ function applyTerrainSmoothing() {
 const MASK_PPMM = 4;
 
 function buildMasks(sheets, W, H) {
-  const mw = Math.max(1, Math.ceil(W * MASK_PPMM));
-  const mh = Math.max(1, Math.ceil(H * MASK_PPMM));
+  const mw = atLeast(1, Math.ceil(W * MASK_PPMM));
+  const mh = atLeast(1, Math.ceil(H * MASK_PPMM));
   const c = document.createElement('canvas');
   c.width = mw; c.height = mh;
   const ctx = c.getContext('2d', { willReadFrequently: true });
@@ -495,8 +497,8 @@ function boxInMask(mask, x0, y0, x1, y1, step = 0.4) {
 const EDGE_CELL = 4;                    // mm; a few hundred cells for a sheet
 
 function buildEdgeIndex(sheet, W, H) {
-  const cols = Math.max(1, Math.ceil(W / EDGE_CELL));
-  const rows = Math.max(1, Math.ceil(H / EDGE_CELL));
+  const cols = atLeast(1, Math.ceil(W / EDGE_CELL));
+  const rows = atLeast(1, Math.ceil(H / EDGE_CELL));
   const cells = new Array(cols * rows);
   for (const rings of sheet.polygons || []) {
     for (const r of rings) {
@@ -1177,7 +1179,7 @@ async function fetchOsm() {
     const { features, places } = await fetchOsmFeatures({
       bbox: state.bbox, groups,
       sheetW: sig.sheetW, sheetH: sig.sheetH,
-      simplifyTol: Math.max(0.05, num('simplifyTol')),
+      simplifyTol: atLeast(0.05, num('simplifyTol')),
       minLength: 1.2,
       onProgress: setProgress, signal: ctrl.signal,
     });
@@ -2174,6 +2176,46 @@ function updateSummaries() {
 
 /* ── parameter wiring ────────────────────────────────────────────────── */
 
+/**
+ * A number field has to hold a number, and one inside its own range. Left empty
+ * it hands NaN to everything downstream — a NaN sheet width reaches the mask
+ * canvas as a NaN size and throws out of getImageData, with the raw DOM message
+ * landing in the status bar — and typed past its limits it reaches the export
+ * intact, where a width of -50 mm is not an SVG any cutter will take. The min
+ * and max in the markup only ever advised; this is what enforces them.
+ *
+ * A field carrying a placeholder is allowed to be empty: that is how the level
+ * floor and ceiling say "auto".
+ */
+function repairNumber(el) {
+  if (el.tagName !== 'INPUT' || el.type !== 'number') return false;
+  if (el.placeholder && el.value.trim() === '') return false;
+
+  const lo = parseFloat(el.min), hi = parseFloat(el.max);
+  const cur = parseFloat(el.value);
+  let v = cur;
+  if (!Number.isFinite(v)) v = parseFloat(el.defaultValue);
+  if (!Number.isFinite(v)) v = Number.isFinite(lo) ? lo : 0;
+  if (Number.isFinite(lo)) v = Math.max(lo, v);
+  if (Number.isFinite(hi)) v = Math.min(hi, v);
+
+  // Leave a field that merely spells its number differently alone: "200.0" is
+  // 200, and rewriting it under the caret helps nobody.
+  if (Number.isFinite(cur) && cur === v) return false;
+  el.value = String(v);
+  return true;
+}
+
+// Capture, so the value is sound before the handlers that read it run — and so
+// what the field shows is what the piece is being built from.
+$('panel').addEventListener('change', e => {
+  if (repairNumber(e.target)) e.target.dispatchEvent(new Event('input', { bubbles: true }));
+}, true);
+
+/** Sweep every field at once, for values that arrive without a change event. */
+const repairNumbers = () =>
+  document.querySelectorAll('#panel input[type=number]').forEach(repairNumber);
+
 $('smoothTerrain').addEventListener('input', () => {
   $('smoothTerrainOut').textContent = $('smoothTerrain').value;
   applyTerrainSmoothing();
@@ -2192,7 +2234,14 @@ for (const id of ['simplifyTol', 'minFeature', 'minHole', 'kerf', 'baseFull',
 $('osmPlacement').addEventListener('change', () => { assignFeatures(); redraw(); });
 
 for (const id of ['stockW', 'stockH', 'stockMargin', 'partSpacing', 'allowRotate'])
-  $(id).addEventListener('change', () => { computeNesting(); redraw(); });
+  $(id).addEventListener('change', () => { computeNesting(); updateSummaries(); redraw(); });
+
+// Neither of these rebuilds anything — a feature type only changes what the next
+// fetch will bring, and the jig is decided at export time — but both change what
+// the section header claims about itself once it is closed, and a header that
+// misreports the settings is the one thing it exists not to do.
+for (const [id] of OSM_IDS) $(id).addEventListener('change', updateSummaries);
+$('makeJig').addEventListener('change', updateSummaries);
 
 // Annotation settings only change what is engraved, so they skip the rebuild.
 for (const id of ['labelSize', 'labelMax', 'labelDot', 'labelFit', 'placeMin', 'osm_place',
@@ -2317,6 +2366,7 @@ async function restoreShared(p) {
   drawFrame();
   onAreaChanged();
   applyControlValues(p);      // the link is the authority: it outranks anything just derived
+  repairNumbers();            // ...but a hand-edited one can still name a width of "abc"
   updateDerived();
 
   // Spin is set first: switching to the 3D view is what starts the loop.

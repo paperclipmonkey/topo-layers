@@ -8,6 +8,14 @@ const EPS = 1e-6;
 
 const NICE = [1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000];
 
+// Round numbers fall where the ladder puts them, so their count follows from the
+// range rather than from the layer count asked for. The floor and ceiling are
+// typed by hand and carry no limits, so that range can be any width at all — and
+// at one step every 5000 m a ceiling of 10,000,000 is two thousand levels, each
+// of which d3-contour then has to trace. Past this many the step is coarsened
+// instead, which costs round numbers nobody asked for rather than the tab.
+const MAX_LEVELS = 200;
+
 export function makeThresholds({ mode, count, min, max, values }) {
   const lo = Number.isFinite(min) ? min : 0;
   const hi = Number.isFinite(max) ? max : 1;
@@ -19,11 +27,16 @@ export function makeThresholds({ mode, count, min, max, values }) {
   }
 
   if (mode === 'round') {
-    const target = (hi - lo) / (n + 1);
+    const span = hi - lo;
+    const target = span / (n + 1);
     let step = NICE[NICE.length - 1];
     for (const s of NICE) if (s >= target) { step = s; break; }
+    // A span too wide for the ladder — including one wide enough to be Infinity,
+    // which would otherwise start a walk that never reaches the end.
+    if (!(span / step <= MAX_LEVELS)) step = span / MAX_LEVELS;
     const out = [];
-    for (let t = Math.ceil((lo + EPS) / step) * step; t < hi; t += step) out.push(t);
+    for (let t = Math.ceil((lo + EPS) / step) * step;
+         t < hi && out.length < MAX_LEVELS; t += step) out.push(t);
     return out;
   }
 
